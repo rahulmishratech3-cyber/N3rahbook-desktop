@@ -1,0 +1,8 @@
+{
+  "server_url": "https://httpbin.org/post",
+  "api_token": "test-secret-key-123",
+  "sync_folder": "D:\\python inventory\\exports\\test_sync_folder",
+  "auto_backup_on_exit": true,
+  "last_backup_time": "20/08/2026 10:48 PM",
+  "last_backup_status": "Local Snapshot created (120.0 KB) | Server HTTP 200: Backup uploaded successfully! | Copied backup to D:\\python inventory\\exports\\test_sync_folder\\inventory_backup_20260820_224814.db"
+}
