@@ -105,6 +105,7 @@ class PurchaseOrderModel:
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (item_id, 'Add', qty, 'Purchase Order Received', 'Admin', f"Stock received via PO #{po_number}{notes_sub}")
+                    )
             conn.commit()
 
             # Sync payment with Payments table and recalculate Supplier balance

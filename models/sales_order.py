@@ -140,6 +140,8 @@ class SalesOrderModel:
                         dispatched_amount=tot_billed_amt,
                         notes=f"Auto-deducted via Tax Invoice #{order_data.get('invoice_number')}"
                     )
+                except Exception as ex:
+                    print(f"[SalesOrderModel] Customer PO sync warning: {ex}")
             # Automatically sync payment status with Payments table and recalculate Customer balance
             try:
                 from models.payment import PaymentModel
@@ -265,6 +267,7 @@ class SalesOrderModel:
                         notes=f"Auto-deducted via Updated Invoice #{inv_no}"
                     )
             except Exception:
+                pass
             # Automatically sync payment status with Payments table and recalculate Customer balance
             try:
                 from models.payment import PaymentModel
