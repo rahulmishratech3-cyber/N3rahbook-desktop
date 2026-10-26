@@ -351,6 +351,8 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 """)
+            except Exception:
+                pass
             conn.commit()
 
         try:
