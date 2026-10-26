@@ -230,26 +230,29 @@ class DatabaseManager:
                 pass
             self._pg_pool = None
 
+        env_url = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
         config_file = Path(self.db_path).parent / "cloud_config.json"
+        
+        cfg_url = ""
+        cfg_enabled = False
         if config_file.exists():
             try:
                 import json
                 with open(config_file, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                if cfg.get("enabled") and cfg.get("connection_url") and PSYCOPG2_AVAILABLE:
-                    self.cloud_mode = True
-                    self.cloud_url = cfg["connection_url"].strip()
-                    display_host = self.cloud_url.split('@')[-1] if '@' in self.cloud_url else 'configured'
-                    print(f"[DB] Active Backend: Cloud PostgreSQL ({display_host})")
-                    self._init_pg_pool()
-                else:
-                    self.cloud_mode = False
-                    self.cloud_url = ""
-                    print(f"[DB] Active Backend: Local SQLite ({self.db_path})")
+                cfg_enabled = cfg.get("enabled", False)
+                cfg_url = (cfg.get("connection_url") or "").strip()
             except Exception as ex:
-                self.cloud_mode = False
-                self.cloud_url = ""
-                print(f"[DB] Error checking cloud config, default to SQLite: {ex}")
+                print(f"[DB] Error checking cloud config: {ex}")
+
+        target_url = env_url if env_url else (cfg_url if cfg_enabled else "")
+
+        if target_url and PSYCOPG2_AVAILABLE:
+            self.cloud_mode = True
+            self.cloud_url = target_url
+            display_host = self.cloud_url.split('@')[-1] if '@' in self.cloud_url else 'configured'
+            print(f"[DB] Active Backend: Cloud PostgreSQL ({display_host})")
+            self._init_pg_pool()
         else:
             self.cloud_mode = False
             self.cloud_url = ""
