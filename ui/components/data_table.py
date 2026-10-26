@@ -40,14 +40,25 @@ class DataTable(tk.Frame):
         h_scroll.config(command=self.tree.xview)
 
         # Configure columns
-        for key, heading, width, anchor in self.columns:
+        for col_def in self.columns:
+            key = col_def[0]
+            heading = col_def[1]
+            width = col_def[2]
+            anchor = col_def[3]
+            # Smart-stretch: only expand text/name columns if not explicitly specified
+            if len(col_def) > 4:
+                stretch = bool(col_def[4])
+            else:
+                stretch = any(k in key.lower() for k in ['name', 'description', 'address', 'company', 'notes'])
+
             self.tree.heading(
                 key,
                 text=heading,
                 anchor=anchor,
                 command=lambda k=key: self._sort_column(k)
             )
-            self.tree.column(key, width=width, anchor=anchor)
+            # minwidth=max(70, width) guarantees columns NEVER shrink into cropped ellipsis
+            self.tree.column(key, width=width, minwidth=max(70, width), anchor=anchor, stretch=stretch)
             self.sort_desc[key] = False
 
         # Configure alternating tags
@@ -64,7 +75,14 @@ class DataTable(tk.Frame):
         self.tree.bind("<Control-A>", self._select_all_event)
 
         if self.on_double_click:
-            self.tree.bind("<Double-1>", lambda e: self.on_double_click(self.get_selected_item()))
+            def _handle_dbl_click(event):
+                item_id = self.tree.identify_row(event.y)
+                if item_id:
+                    self.tree.selection_set(item_id)
+                selected = self.get_selected_item()
+                if selected:
+                    self.on_double_click(selected)
+            self.tree.bind("<Double-1>", _handle_dbl_click)
 
     def _select_all_event(self, event=None):
         self.select_all()

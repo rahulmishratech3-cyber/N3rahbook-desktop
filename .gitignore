@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.spec
+*.zip
+
+# Local SQLite databases & backups (keep your real data safe & private)
+*.db
+exports/backups/
+exports/*.xlsx
+generated_invoices/
+tax invoices/
+
+# Cloud & session secrets
+cloud_config.json
+backup_config.json
+.session.json
+
+# Environment & IDE
+.env
+.venv/
+env/
+venv/
+.idea/
+.vscode/

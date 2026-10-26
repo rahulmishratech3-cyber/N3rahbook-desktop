@@ -25,7 +25,7 @@ class ItemsView(tk.Frame):
         tk.Label(ctrl_bar, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=4)
         self.search_entry = ttk.Entry(ctrl_bar, width=20)
         self.search_entry.pack(side="left", padx=4)
-        self.search_entry.bind("<KeyRelease>", lambda e: self.refresh_data())
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
 
         # Category Filter
         tk.Label(ctrl_bar, text="Category:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=5)
@@ -59,20 +59,25 @@ class ItemsView(tk.Frame):
         table_container.pack(fill="both", expand=True, padx=20, pady=5)
 
         cols = [
-            ("sku", "SKU Code", 100, "center"),
-            ("hsn_code", "HSN Code", 85, "center"),
-            ("name", "Product Name", 200, "w"),
-            ("category", "Main Category", 130, "center"),
-            ("subcategory", "Sub-Category", 140, "center"),
-            ("unit", "Unit", 60, "center"),
-            ("cost_price", "Cost Price (₹)", 95, "e"),
-            ("selling_price", "Selling Price (₹)", 105, "e"),
-            ("current_stock", "Stock Qty", 85, "center"),
-            ("reorder_level", "Reorder Level", 85, "center"),
-            ("status", "Status", 75, "center")
+            ("sku", "SKU Code", 110, "center"),
+            ("hsn_code", "HSN Code", 95, "center"),
+            ("name", "Product Name", 240, "w"),
+            ("category", "Main Category", 140, "center"),
+            ("subcategory", "Sub-Category / Grade", 150, "center"),
+            ("unit", "Unit", 70, "center"),
+            ("cost_price", "Cost Price (₹)", 110, "e"),
+            ("selling_price", "Selling Price (₹)", 115, "e"),
+            ("current_stock", "Available Stock", 110, "center"),
+            ("reorder_level", "Reorder Level", 100, "center"),
+            ("status", "Status", 95, "center")
         ]
         self.table = DataTable(table_container, cols, on_double_click=self._edit_selected)
         self.table.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def _on_search_key(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, self.refresh_data)
 
     def _on_cat_changed(self, event=None):
         cat = self.cat_combo.get()
@@ -86,10 +91,6 @@ class ItemsView(tk.Frame):
         category = self.cat_combo.get()
         subcategory = self.subcat_combo.get() if hasattr(self, 'subcat_combo') else "All"
         stock_filter = self.stock_combo.get()
-
-        # Update Category list
-        categories = ["All"] + ItemModel.get_categories()
-        self.cat_combo.config(values=categories)
 
         items = ItemModel.search(query=query, category=category, subcategory=subcategory, stock_filter=stock_filter)
         

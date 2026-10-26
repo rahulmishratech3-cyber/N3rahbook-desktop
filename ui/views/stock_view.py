@@ -31,7 +31,7 @@ class StockView(tk.Frame):
         tk.Label(filter_bar, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(0, 4))
         self.search_entry = ttk.Entry(filter_bar, width=22)
         self.search_entry.pack(side="left", padx=(0, 15))
-        self.search_entry.bind("<KeyRelease>", lambda e: self.refresh_data())
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
 
         tk.Label(filter_bar, text="Movement Type:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(0, 4))
         self.type_combo = ttk.Combobox(filter_bar, values=["All", "Add (Inwards)", "Remove (Outwards)"], state="readonly", width=18)
@@ -43,19 +43,24 @@ class StockView(tk.Frame):
         table_container.pack(fill="both", expand=True, padx=20, pady=5)
 
         cols = [
-            ("id", "Txn ID", 65, "center"),
+            ("id", "Txn ID", 75, "center"),
             ("adjustment_date", "Date & Time", 140, "center"),
-            ("sku", "SKU", 100, "center"),
-            ("item_name", "Product Name", 220, "w"),
-            ("type_display", "Type (In/Out)", 110, "center"),
-            ("quantity_display", "Quantity", 90, "center"),
-            ("unit", "Unit", 65, "center"),
-            ("reason", "Reason Code", 140, "center"),
-            ("adjusted_by", "Adjusted By", 100, "center"),
-            ("notes", "Invoice / Reference Notes", 260, "w")
+            ("sku", "SKU", 110, "center"),
+            ("item_name", "Product Name", 240, "w"),
+            ("type_display", "Type (In/Out)", 120, "center"),
+            ("quantity_display", "Quantity", 110, "center"),
+            ("unit", "Unit", 70, "center"),
+            ("reason", "Reason Code", 150, "center"),
+            ("adjusted_by", "Adjusted By", 110, "center"),
+            ("notes", "Invoice / Reference Notes", 280, "w")
         ]
         self.table = DataTable(table_container, cols)
         self.table.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def _on_search_key(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, self.refresh_data)
 
     def refresh_data(self):
         adjustments = InventoryModel.get_adjustments()

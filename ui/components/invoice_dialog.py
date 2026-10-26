@@ -17,8 +17,14 @@ class InvoiceDialog(tk.Toplevel):
     def __init__(self, parent, order_id=None, on_save=None):
         super().__init__(parent)
         self.title("GST Tax Invoice Creator & Print Preview")
-        self.geometry("1100x780")
-        self.minsize(1020, 700)
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        dlg_w = min(1120, max(940, screen_w - 60))
+        dlg_h = min(730, max(560, screen_h - 80))
+        dlg_x = max(10, (screen_w - dlg_w) // 2)
+        dlg_y = max(10, (screen_h - dlg_h) // 2 - 20)
+        self.geometry(f"{dlg_w}x{dlg_h}+{dlg_x}+{dlg_y}")
+        self.minsize(940, 540)
         self.configure(bg=COLORS["bg_dark"])
         self.transient(parent)
         self.grab_set()
@@ -52,40 +58,102 @@ class InvoiceDialog(tk.Toplevel):
         self.page_size_combo.current(0) # Default A4
         self.page_size_combo.pack(side="left", padx=5)
 
-        tk.Label(format_frame, text="Copy:", font=FONTS["small"], bg=COLORS["bg_header"], fg=COLORS["text_muted"]).pack(side="left", padx=2)
-        self.copy_combo = ttk.Combobox(format_frame, values=["ORIGINAL FOR RECIPIENT", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR SUPPLIER"], state="readonly", width=24)
+        tk.Label(format_frame, text="Copy:", font=FONTS["small"], bg=COLORS["bg_header"], fg=COLORS["text_muted"]).pack(side="left", padx=(8, 2))
+        self.copy_combo = ttk.Combobox(
+            format_frame,
+            values=[
+                "4 COPIES (Original, Duplicate, Triplicate, Extra)",
+                "ALL 3 COPIES (Original, Duplicate, Triplicate)",
+                "ORIGINAL FOR RECIPIENT",
+                "DUPLICATE FOR TRANSPORTER",
+                "TRIPLICATE FOR SUPPLIER",
+                "EXTRA COPY"
+            ],
+            state="readonly",
+            width=36
+        )
         self.copy_combo.current(0)
         self.copy_combo.pack(side="left", padx=5)
+        # 2. Bottom Footer Container (Totals + Action Buttons pinned to bottom of window so ALWAYS 100% visible)
+        footer_frame = tk.Frame(self, bg=COLORS["bg_dark"], padx=15, pady=4)
+        footer_frame.pack(fill="x", side="bottom")
 
-        # 2. Main Scrollable Canvas Container
-        container = tk.Frame(self, bg=COLORS["bg_dark"], padx=15, pady=10)
+        # Totals & Words Frame
+        tot_frame = tk.Frame(footer_frame, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=14, pady=6)
+        tot_frame.pack(fill="x", pady=(0, 4))
+
+        left_tot = tk.Frame(tot_frame, bg=COLORS["bg_card"])
+        left_tot.pack(side="left", fill="both", expand=True)
+
+        self.words_lbl = tk.Label(left_tot, text="Total in Words: Zero Rupees Only", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["accent"], wraplength=480, justify="left")
+        self.words_lbl.pack(anchor="w", pady=(0, 2))
+
+        self.tax_note_lbl = tk.Label(left_tot, text="* GST @ 18% (9% CGST + 9% SGST) applied to all taxable items & freight.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"])
+        self.tax_note_lbl.pack(anchor="w")
+
+        right_tot = tk.Frame(tot_frame, bg=COLORS["bg_card"])
+        right_tot.pack(side="right")
+
+        # Items Subtotal
+        self.subtot_var = tk.StringVar(value="Items Subtotal: ₹ 0.00")
+        tk.Label(right_tot, textvariable=self.subtot_var, font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, columnspan=2, sticky="e", pady=0)
+
+        # Fare / Freight Row
+        tk.Label(right_tot, text="🚚 Freight / Fare (₹):", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["text_dark"]).grid(row=1, column=0, sticky="e", padx=(0, 6), pady=1)
+        self.freight_entry = ttk.Entry(right_tot, width=12, justify="right")
+        self.freight_entry.insert(0, "0.00")
+        self.freight_entry.grid(row=1, column=1, sticky="e", pady=1)
+        self.freight_entry.bind("<KeyRelease>", lambda e: self._recalculate_totals())
+
+        # Tax
+        self.tax_var = tk.StringVar(value="GST Tax (9%+9%): ₹ 0.00")
+        tk.Label(right_tot, textvariable=self.tax_var, font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=2, column=0, columnspan=2, sticky="e", pady=0)
+
+        # Grand Total
+        self.grand_tot_var = tk.StringVar(value="Grand Total: ₹ 0.00")
+        tk.Label(right_tot, textvariable=self.grand_tot_var, font=("Segoe UI", 12, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"]).grid(row=3, column=0, columnspan=2, sticky="e", pady=(1, 0))
+
+        # Bottom Action Buttons
+        btn_bar = tk.Frame(footer_frame, bg=COLORS["bg_dark"], pady=4)
+        btn_bar.pack(fill="x")
+
+        ttk.Button(btn_bar, text="Close", style="Secondary.TButton", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="🖨️ Export / Print PDF Invoice", style="Success.TButton", command=self._export_pdf).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="💾 Save Invoice Record", style="Primary.TButton", command=self._save_invoice).pack(side="right", padx=4)
+
+        if self.order_id:
+            ttk.Button(btn_bar, text="🗑️ Delete Invoice", style="Secondary.TButton", command=self._delete_invoice).pack(side="left", padx=4)
+            ttk.Button(btn_bar, text="🚫 Cancel Invoice", style="Secondary.TButton", command=self._cancel_invoice).pack(side="left", padx=4)
+
+        # 3. Main Form Container (Fills middle area)
+        container = tk.Frame(self, bg=COLORS["bg_dark"], padx=15, pady=2)
         container.pack(fill="both", expand=True)
 
         # Form Metadata Header
-        meta_box = tk.Frame(container, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=15, pady=12)
-        meta_box.pack(fill="x", pady=5)
+        meta_box = tk.Frame(container, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=14, pady=8)
+        meta_box.pack(fill="x", pady=(0, 4))
 
-        # Row 1: Invoice No, Customer, Date, Due Date, Vehicle No, E-Way Bill No
+        # Row 1: Invoice No, Customer, Date, Due Date, Payment Status
         f_r1 = tk.Frame(meta_box, bg=COLORS["bg_card"])
-        f_r1.pack(fill="x", pady=4)
+        f_r1.pack(fill="x", pady=1)
 
         from datetime import datetime, timedelta
         today_str = datetime.now().strftime("%d/%m/%Y")
         due_str = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
 
         tk.Label(f_r1, text="Invoice No *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=6)
-        self.inv_num_entry = ttk.Entry(f_r1, width=18)
+        self.inv_num_entry = ttk.Entry(f_r1, width=16)
         next_id = (len(SalesOrderModel.get_all()) + 1)
         self.inv_num_entry.insert(0, f"INV-{datetime.now().year}-{next_id:03d}")
         self.inv_num_entry.grid(row=1, column=0, sticky="w", padx=6, pady=2)
 
-        tk.Label(f_r1, text="Select Customer *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=1, sticky="w", padx=6)
+        tk.Label(f_r1, text="Select Customer / Party *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=1, sticky="w", padx=6)
         
         cust_sub = tk.Frame(f_r1, bg=COLORS["bg_card"])
         cust_sub.grid(row=1, column=1, sticky="w", padx=6, pady=2)
 
-        cust_labels = [f"{c['name']} ({c.get('gstin', 'No GSTIN')})" for c in self.customers]
-        self.cust_combo = ttk.Combobox(cust_sub, values=cust_labels, state="readonly", width=32)
+        cust_labels = self._get_customer_labels()
+        self.cust_combo = ttk.Combobox(cust_sub, values=cust_labels, state="readonly", width=36)
         if cust_labels:
             self.cust_combo.current(0)
         self.cust_combo.pack(side="left", padx=(0, 6))
@@ -93,40 +161,70 @@ class InvoiceDialog(tk.Toplevel):
         ttk.Button(cust_sub, text="➕ New Customer", style="Secondary.TButton", command=self._quick_add_customer).pack(side="left")
 
         tk.Label(f_r1, text="Invoice Date", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=2, sticky="w", padx=6)
-        self.inv_date_entry = ttk.Entry(f_r1, width=14)
+        self.inv_date_entry = ttk.Entry(f_r1, width=13)
         self.inv_date_entry.insert(0, today_str)
         self.inv_date_entry.grid(row=1, column=2, sticky="w", padx=6, pady=2)
 
         tk.Label(f_r1, text="Due Date", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=3, sticky="w", padx=6)
-        self.due_date_entry = ttk.Entry(f_r1, width=14)
+        self.due_date_entry = ttk.Entry(f_r1, width=13)
         self.due_date_entry.insert(0, due_str)
         self.due_date_entry.grid(row=1, column=3, sticky="w", padx=6, pady=2)
 
-        tk.Label(f_r1, text="Vehicle No.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=4, sticky="w", padx=6)
-        self.veh_entry = ttk.Entry(f_r1, width=15)
-        self.veh_entry.grid(row=1, column=4, sticky="w", padx=6, pady=2)
-
-        tk.Label(f_r1, text="E-Way Bill No.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=5, sticky="w", padx=6)
-        self.eway_entry = ttk.Entry(f_r1, width=15)
-        self.eway_entry.grid(row=1, column=5, sticky="w", padx=6, pady=2)
-
-        tk.Label(f_r1, text="Payment Status *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=6, sticky="w", padx=6)
+        tk.Label(f_r1, text="Payment Status *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=4, sticky="w", padx=6)
         self.status_combo = ttk.Combobox(f_r1, values=["Paid", "Unpaid", "Cancelled"], state="readonly", width=11)
         self.status_combo.current(0)
-        self.status_combo.grid(row=1, column=6, sticky="w", padx=6, pady=2)
+        self.status_combo.grid(row=1, column=4, sticky="w", padx=6, pady=2)
 
-        # 3. Items Line Grid Header & Scroll Container
-        items_frame = tk.Frame(container, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=12, pady=10)
-        items_frame.pack(fill="both", expand=True, pady=10)
+        # Live Customer Address Label Row
+        self.cust_addr_lbl = tk.Label(meta_box, text="", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["accent"], wraplength=750, justify="left")
+        self.cust_addr_lbl.pack(fill="x", padx=6, pady=(2, 2))
+        self.cust_combo.bind("<<ComboboxSelected>>", lambda e: self._on_customer_change())
+        self._on_customer_change()
+
+        # Row 2: Buyer PO No, PO Date, Vehicle No, E-Way Bill No
+        f_r2 = tk.Frame(meta_box, bg=COLORS["bg_card"])
+        f_r2.pack(fill="x", pady=1)
+
+        tk.Label(f_r2, text="Buyer PO No. / Ref", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=6)
+        self.po_num_entry = ttk.Combobox(f_r2, width=18)
+        self.po_num_entry.grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        self.po_num_entry.bind("<<ComboboxSelected>>", self._on_po_selected)
+        self.po_num_entry.bind("<KeyRelease>", self._on_po_selected)
+
+        tk.Label(f_r2, text="PO Date", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=1, sticky="w", padx=6)
+        self.po_date_entry = ttk.Entry(f_r2, width=14)
+        self.po_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
+
+        tk.Label(f_r2, text="Vehicle No.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=2, sticky="w", padx=6)
+        self.veh_entry = ttk.Entry(f_r2, width=15)
+        self.veh_entry.grid(row=1, column=2, sticky="w", padx=6, pady=2)
+
+        tk.Label(f_r2, text="E-Way Bill No.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=3, sticky="w", padx=6)
+        self.eway_entry = ttk.Entry(f_r2, width=16)
+        self.eway_entry.grid(row=1, column=3, sticky="w", padx=6, pady=2)
+
+        tk.Label(f_r2, text="GST Tax Applied *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=4, sticky="w", padx=6)
+        self.gst_mode_combo = ttk.Combobox(f_r2, values=["18% GST (9% CGST + 9% SGST)", "18% IGST (Inter-State)", "None (0% / Exempt)"], state="readonly", width=24)
+        self.gst_mode_combo.current(0)
+        self.gst_mode_combo.grid(row=1, column=4, sticky="w", padx=6, pady=2)
+        self.gst_mode_combo.bind("<<ComboboxSelected>>", lambda e: self._recalculate_totals())
+
+        # PO Live Balance Indicator
+        self.po_info_lbl = tk.Label(f_r2, text="", font=FONTS["small_bold"], bg=COLORS["bg_card"], fg=COLORS["warning"])
+        self.po_info_lbl.grid(row=1, column=5, sticky="w", padx=10, pady=2)
+
+        # 4. Items Line Grid Header & Scroll Container (Fills the center area)
+        items_frame = tk.Frame(container, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=12, pady=6)
+        items_frame.pack(fill="both", expand=True, pady=(0, 2))
 
         grid_title_frame = tk.Frame(items_frame, bg=COLORS["bg_card"])
-        grid_title_frame.pack(fill="x", pady=(0, 6))
+        grid_title_frame.pack(fill="x", pady=(0, 4))
         
         tk.Label(grid_title_frame, text="📦 Invoice Items & Tax Particulars", font=FONTS["heading"], bg=COLORS["bg_card"], fg=COLORS["text_light"]).pack(side="left")
         ttk.Button(grid_title_frame, text="➕ Add Item Row", style="Secondary.TButton", command=self._add_line_item_row).pack(side="right")
 
         # Scrollable Line Items Frame
-        canvas = tk.Canvas(items_frame, bg=COLORS["bg_card"], highlightthickness=0)
+        canvas = tk.Canvas(items_frame, bg=COLORS["bg_card"], highlightthickness=0, height=100)
         scrollbar = ttk.Scrollbar(items_frame, orient="vertical", command=canvas.yview)
         
         self.items_grid = tk.Frame(canvas, bg=COLORS["bg_card"])
@@ -156,59 +254,13 @@ class InvoiceDialog(tk.Toplevel):
         self.items_grid.columnconfigure(6, weight=0, minsize=45)   # Action
 
         # Row 0: Table Header Bar
-        tk.Label(self.items_grid, text="Item / Product Description", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="w", padx=8, pady=6).grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="HSN / SAC", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=6).grid(row=0, column=1, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="Quantity", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=6).grid(row=0, column=2, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="Unit", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=6).grid(row=0, column=3, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="Rate / Price (₹)", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="e", padx=8, pady=6).grid(row=0, column=4, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="Taxable Amount (₹)", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="e", padx=8, pady=6).grid(row=0, column=5, sticky="ew", padx=2, pady=(0, 4))
-        tk.Label(self.items_grid, text="Action", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=2, pady=6).grid(row=0, column=6, sticky="ew", padx=2, pady=(0, 4))
-
-        # 4. Footer Totals & Words Frame
-        tot_frame = tk.Frame(container, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=15, pady=10)
-        tot_frame.pack(fill="x", pady=5)
-
-        left_tot = tk.Frame(tot_frame, bg=COLORS["bg_card"])
-        left_tot.pack(side="left", fill="both", expand=True)
-
-        self.words_lbl = tk.Label(left_tot, text="Total in Words: Zero Rupees Only", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["accent"], wraplength=550, justify="left")
-        self.words_lbl.pack(anchor="w", pady=(0, 6))
-
-        tk.Label(left_tot, text="* GST @ 18% (9% CGST + 9% SGST) applied to all taxable items & freight.", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(anchor="w")
-
-        right_tot = tk.Frame(tot_frame, bg=COLORS["bg_card"])
-        right_tot.pack(side="right")
-
-        # Items Subtotal
-        self.subtot_var = tk.StringVar(value="Items Subtotal: ₹ 0.00")
-        tk.Label(right_tot, textvariable=self.subtot_var, font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, columnspan=2, sticky="e", pady=1)
-
-        # Fare / Freight Row
-        tk.Label(right_tot, text="🚚 Freight / Fare (₹):", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["text_dark"]).grid(row=1, column=0, sticky="e", padx=(0, 6), pady=2)
-        self.freight_entry = ttk.Entry(right_tot, width=12, justify="right")
-        self.freight_entry.insert(0, "0.00")
-        self.freight_entry.grid(row=1, column=1, sticky="e", pady=2)
-        self.freight_entry.bind("<KeyRelease>", lambda e: self._recalculate_totals())
-
-        # Tax
-        self.tax_var = tk.StringVar(value="GST Tax (9%+9%): ₹ 0.00")
-        tk.Label(right_tot, textvariable=self.tax_var, font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=2, column=0, columnspan=2, sticky="e", pady=1)
-
-        # Grand Total
-        self.grand_tot_var = tk.StringVar(value="Grand Total: ₹ 0.00")
-        tk.Label(right_tot, textvariable=self.grand_tot_var, font=("Segoe UI", 14, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"]).grid(row=3, column=0, columnspan=2, sticky="e", pady=(2, 0))
-
-        # 5. Bottom Action Buttons
-        btn_bar = tk.Frame(self, bg=COLORS["bg_dark"], padx=20, pady=12)
-        btn_bar.pack(fill="x", side="bottom")
-
-        ttk.Button(btn_bar, text="Close", style="Secondary.TButton", command=self.destroy).pack(side="right", padx=5)
-        ttk.Button(btn_bar, text="🖨️ Export / Print PDF Invoice", style="Success.TButton", command=self._export_pdf).pack(side="right", padx=5)
-        ttk.Button(btn_bar, text="💾 Save Invoice Record", style="Primary.TButton", command=self._save_invoice).pack(side="right", padx=5)
-
-        if self.order_id:
-            ttk.Button(btn_bar, text="🗑️ Delete Invoice", style="Secondary.TButton", command=self._delete_invoice).pack(side="left", padx=5)
-            ttk.Button(btn_bar, text="🚫 Cancel Invoice", style="Secondary.TButton", command=self._cancel_invoice).pack(side="left", padx=5)
+        tk.Label(self.items_grid, text="Item / Product Description", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="w", padx=8, pady=5).grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="HSN / SAC", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=5).grid(row=0, column=1, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="Quantity", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=5).grid(row=0, column=2, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="Unit", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=4, pady=5).grid(row=0, column=3, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="Rate / Price (₹)", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="e", padx=8, pady=5).grid(row=0, column=4, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="Taxable Amount (₹)", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="e", padx=8, pady=5).grid(row=0, column=5, sticky="ew", padx=2, pady=(0, 4))
+        tk.Label(self.items_grid, text="Action", font=FONTS["body_bold"], bg=COLORS["bg_card_alt"], fg=COLORS["text_dark"], anchor="center", padx=2, pady=5).grid(row=0, column=6, sticky="ew", padx=2, pady=(0, 4))
 
     def _delete_invoice(self):
         if not self.order_id:
@@ -361,14 +413,35 @@ class InvoiceDialog(tk.Toplevel):
             freight = 0.0
 
         taxable_total = subtotal + freight
-        cgst_sum = taxable_total * 0.09
-        sgst_sum = taxable_total * 0.09
-        raw_total = taxable_total + cgst_sum + sgst_sum
+        gst_mode = self.gst_mode_combo.get() if hasattr(self, 'gst_mode_combo') else "18% GST (9% CGST + 9% SGST)"
+
+        if "IGST" in gst_mode:
+            cgst_sum = 0.0
+            sgst_sum = 0.0
+            igst_sum = taxable_total * 0.18
+            self.tax_var.set(f"IGST Tax (18%): ₹ {igst_sum:,.2f}")
+            if hasattr(self, 'tax_note_lbl'):
+                self.tax_note_lbl.config(text="* 18% IGST (Inter-State) applied to all taxable items & freight.")
+        elif "18%" in gst_mode or "9%" in gst_mode:
+            cgst_sum = taxable_total * 0.09
+            sgst_sum = taxable_total * 0.09
+            igst_sum = 0.0
+            self.tax_var.set(f"GST Tax (9% CGST + 9% SGST): ₹ {(cgst_sum + sgst_sum):,.2f}")
+            if hasattr(self, 'tax_note_lbl'):
+                self.tax_note_lbl.config(text="* GST @ 18% (9% CGST + 9% SGST) applied to all taxable items & freight.")
+        else:
+            cgst_sum = 0.0
+            sgst_sum = 0.0
+            igst_sum = 0.0
+            self.tax_var.set("GST Tax (0% Exempt): ₹ 0.00")
+            if hasattr(self, 'tax_note_lbl'):
+                self.tax_note_lbl.config(text="* 0% Tax (Exempt / Nil-Rated).")
+
+        raw_total = taxable_total + cgst_sum + sgst_sum + igst_sum
         grand_total = round(raw_total)
         round_off = grand_total - raw_total
 
         self.subtot_var.set(f"Items Subtotal: ₹ {subtotal:,.2f}")
-        self.tax_var.set(f"GST Tax (9%+9%): ₹ {(cgst_sum + sgst_sum):,.2f}")
         self.grand_tot_var.set(f"Grand Total: ₹ {grand_total:,.2f}")
 
         words = number_to_words_indian(grand_total)
@@ -379,6 +452,8 @@ class InvoiceDialog(tk.Toplevel):
         if not order:
             return
 
+        self.title(f"✏️ Edit Tax Invoice - {order.get('invoice_number', '')}")
+
         self.inv_num_entry.delete(0, tk.END)
         self.inv_num_entry.insert(0, order['invoice_number'])
 
@@ -387,6 +462,21 @@ class InvoiceDialog(tk.Toplevel):
 
         self.due_date_entry.delete(0, tk.END)
         self.due_date_entry.insert(0, order.get('due_date', ''))
+
+        # Select Customer
+        for idx, c in enumerate(self.customers):
+            if str(c['id']) == str(order.get('customer_id', '')):
+                self.cust_combo.current(idx)
+                break
+        self._on_customer_change()
+
+        po_num_val = str(order.get('po_number') or '').strip()
+        self.po_num_entry.set(po_num_val)
+
+        po_date_val = str(order.get('po_date') or '').strip()
+        self.po_date_entry.delete(0, tk.END)
+        self.po_date_entry.insert(0, po_date_val)
+        self._on_po_selected()
 
         self.veh_entry.delete(0, tk.END)
         self.veh_entry.insert(0, order.get('vehicle_no', ''))
@@ -407,11 +497,22 @@ class InvoiceDialog(tk.Toplevel):
         else:
             self.status_combo.set('Paid')
 
-        # Select Customer
-        for idx, c in enumerate(self.customers):
-            if c['id'] == order['customer_id']:
-                self.cust_combo.current(idx)
-                break
+        # Set GST Mode
+        igst_val = float(order.get('igst_amount', 0.0) or 0.0)
+        cgst_val = float(order.get('cgst_amount', 0.0) or 0.0)
+        if igst_val > 0:
+            self.gst_mode_combo.set("18% IGST (Inter-State)")
+        elif cgst_val > 0:
+            self.gst_mode_combo.set("18% GST (9% CGST + 9% SGST)")
+        else:
+            has_igst = any(float(i.get('igst_rate', 0.0) or 0.0) > 0 for i in order.get('items', []))
+            has_cgst = any(float(i.get('cgst_rate', 0.0) or 0.0) > 0 for i in order.get('items', []))
+            if has_igst:
+                self.gst_mode_combo.set("18% IGST (Inter-State)")
+            elif has_cgst:
+                self.gst_mode_combo.set("18% GST (9% CGST + 9% SGST)")
+            else:
+                self.gst_mode_combo.set("None (0% / Exempt)")
 
         # Clear initial blank row
         for r in self.line_items:
@@ -430,7 +531,7 @@ class InvoiceDialog(tk.Toplevel):
             
             # Select Item in combo
             for i_idx, itm in enumerate(self.items_list):
-                if itm['id'] == item['item_id']:
+                if str(itm['id']) == str(item.get('item_id', '')):
                     last_row['combo_item'].current(i_idx)
                     break
 
@@ -458,6 +559,10 @@ class InvoiceDialog(tk.Toplevel):
         item_rows = []
         subtotal = 0.0
 
+        gst_mode = self.gst_mode_combo.get() if hasattr(self, 'gst_mode_combo') else "18% GST (9% CGST + 9% SGST)"
+        is_igst = "IGST" in gst_mode
+        is_exempt = "None" in gst_mode or "0%" in gst_mode
+
         for r in self.line_items:
             i_idx = r['combo_item'].current()
             if i_idx < 0:
@@ -470,8 +575,21 @@ class InvoiceDialog(tk.Toplevel):
             hsn = r['entry_hsn'].get().strip()
             unit = r['entry_unit'].get().strip()
 
-            cgst_amt = amt * 0.09
-            sgst_amt = amt * 0.09
+            if is_igst:
+                cgst_r = 0.0
+                sgst_r = 0.0
+                igst_r = 18.0
+                t_amt = amt * 0.18
+            elif not is_exempt:
+                cgst_r = 9.0
+                sgst_r = 9.0
+                igst_r = 0.0
+                t_amt = amt * 0.18
+            else:
+                cgst_r = 0.0
+                sgst_r = 0.0
+                igst_r = 0.0
+                t_amt = 0.0
             
             subtotal += amt
 
@@ -484,9 +602,10 @@ class InvoiceDialog(tk.Toplevel):
                 'unit_price': rate,
                 'discount': 0.0,
                 'amount': amt,
-                'cgst_rate': 9.0,
-                'sgst_rate': 9.0,
-                'tax_amount': cgst_amt + sgst_amt
+                'cgst_rate': cgst_r,
+                'sgst_rate': sgst_r,
+                'igst_rate': igst_r,
+                'tax_amount': t_amt
             })
 
         try:
@@ -495,9 +614,20 @@ class InvoiceDialog(tk.Toplevel):
             freight = 0.0
 
         taxable_total = subtotal + freight
-        cgst_sum = taxable_total * 0.09
-        sgst_sum = taxable_total * 0.09
-        raw_tot = taxable_total + cgst_sum + sgst_sum
+        if is_igst:
+            cgst_sum = 0.0
+            sgst_sum = 0.0
+            igst_sum = taxable_total * 0.18
+        elif not is_exempt:
+            cgst_sum = taxable_total * 0.09
+            sgst_sum = taxable_total * 0.09
+            igst_sum = 0.0
+        else:
+            cgst_sum = 0.0
+            sgst_sum = 0.0
+            igst_sum = 0.0
+
+        raw_tot = taxable_total + cgst_sum + sgst_sum + igst_sum
         grand_tot = round(raw_tot)
         round_off = grand_tot - raw_tot
 
@@ -520,6 +650,8 @@ class InvoiceDialog(tk.Toplevel):
             'customer_id': customer['id'],
             'invoice_date': self.inv_date_entry.get().strip(),
             'due_date': self.due_date_entry.get().strip(),
+            'po_number': self.po_num_entry.get().strip(),
+            'po_date': self.po_date_entry.get().strip(),
             'vehicle_no': self.veh_entry.get().strip(),
             'eway_bill_no': self.eway_entry.get().strip(),
             'fiscal_year': active_fy,
@@ -530,7 +662,7 @@ class InvoiceDialog(tk.Toplevel):
             'freight': freight,
             'cgst_amount': cgst_sum,
             'sgst_amount': sgst_sum,
-            'igst_amount': 0.0,
+            'igst_amount': igst_sum,
             'round_off': round_off,
             'total_amount': grand_tot,
             'notes': 'Generated via Desktop App'
@@ -540,15 +672,46 @@ class InvoiceDialog(tk.Toplevel):
 
     def _save_invoice(self):
         try:
-            order_data, _, item_rows = self._get_form_payload()
+            order_data, customer, item_rows = self._get_form_payload()
             if self.order_id:
                 SalesOrderModel.update(self.order_id, order_data, item_rows)
             else:
                 self.order_id = SalesOrderModel.create(order_data, item_rows)
+            
+            # --- AUTO GENERATE PDF AND SAVE TO FOLDER ---
+            import os
+            from services.pdf_service import generate_tax_invoice_pdf
+            
+            folder_name = "tax invoices"
+            if not os.path.exists(folder_name):
+                os.makedirs(folder_name)
+            
+            inv_num = order_data.get('invoice_number', str(self.order_id)).replace('/', '-')
+            pdf_filename = os.path.join(folder_name, f"Invoice_{inv_num}.pdf")
+            
+            # Use same page size and copy type selected in the UI (default is now 4 COPIES)
+            page_size = self.page_size_combo.get() if hasattr(self, 'page_size_combo') else "A4"
+            copy_type = self.copy_combo.get() if hasattr(self, 'copy_combo') else "4 COPIES"
+            
+            # Ensure order dict has 'id' because PDF service might use it
+            order_data['id'] = self.order_id
+            
+            generate_tax_invoice_pdf(
+                order=order_data,
+                customer=customer,
+                items=item_rows,
+                page_size=page_size,
+                copy_type=copy_type,
+                filename=pdf_filename
+            )
+            # --------------------------------------------
+            
             if self.on_save:
                 self.on_save()
-            messagebox.showinfo("Success", f"Invoice #{order_data['invoice_number']} saved successfully!", parent=self)
+            messagebox.showinfo("Success", f"Invoice #{order_data['invoice_number']} saved successfully!\n\nPDF Auto-Saved to: {folder_name}/", parent=self)
         except Exception as ex:
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Error", f"Failed to save invoice: {str(ex)}", parent=self)
 
     def _export_pdf(self):
@@ -575,13 +738,102 @@ class InvoiceDialog(tk.Toplevel):
         except Exception as ex:
             messagebox.showerror("Export Error", f"Failed to generate PDF: {str(ex)}", parent=self)
 
+    def _get_customer_labels(self):
+        labels = []
+        for c in self.customers:
+            comp = str(c.get('company_name') or '').strip()
+            name = str(c.get('name') or '').strip()
+            addr = str(c.get('address') or '').strip()
+            label = comp if comp else name
+            if comp and name and comp.lower() != name.lower():
+                label = f"{comp} ({name})"
+            if addr and addr.lower() != 'n/a':
+                label += f" — 📍 {addr}"
+            labels.append(label)
+        return labels
+
+    def _on_customer_change(self):
+        if not hasattr(self, 'cust_addr_lbl') or not self.customers:
+            return
+        idx = self.cust_combo.current()
+        if 0 <= idx < len(self.customers):
+            c = self.customers[idx]
+            addr = str(c.get('address') or 'N/A').strip()
+            gstin = str(c.get('gstin') or 'N/A').strip()
+            phone = str(c.get('phone') or '').strip()
+            txt = f"📍 Address: {addr}"
+            if gstin and gstin != 'N/A':
+                txt += f"  |  GSTIN: {gstin}"
+            if phone:
+                txt += f"  |  Mob: {phone}"
+            self.cust_addr_lbl.config(text=txt)
+
+            # Auto-detect Inter-State (IGST) vs Intra-State (CGST + SGST)
+            if hasattr(self, 'gst_mode_combo') and not self.order_id:
+                pos = str(c.get('place_of_supply') or '').strip().lower()
+                gstin_clean = gstin.strip().upper()
+                addr_lower = addr.lower()
+
+                is_igst = False
+                if len(gstin_clean) >= 2 and gstin_clean[:2].isdigit():
+                    if gstin_clean[:2] != '09':
+                        is_igst = True
+                elif pos and pos not in ('uttar pradesh', 'up'):
+                    is_igst = True
+                elif not pos and addr_lower:
+                    if any(st in addr_lower for st in ['delhi', 'haryana', 'rajasthan', 'punjab', 'maharashtra', 'gujarat', 'madhya pradesh', 'bihar', 'uttarakhand', 'karnataka', 'tamil nadu', 'telangana', 'west bengal', 'odisha', 'chandigarh']):
+                        is_igst = True
+
+                if is_igst:
+                    self.gst_mode_combo.set("18% IGST (Inter-State)")
+                else:
+                    self.gst_mode_combo.set("18% GST (9% CGST + 9% SGST)")
+                self._recalculate_totals()
+
+            # Auto-populate open POs for this customer in dropdown
+            if hasattr(self, 'po_num_entry'):
+                try:
+                    from models.customer_po import CustomerPOModel
+                    pos = CustomerPOModel.get_pos_for_customer(c['id'])
+                    po_vals = [p['po_number'] for p in pos]
+                    self.po_num_entry['values'] = po_vals
+                    self._on_po_selected()
+                except Exception:
+                    pass
+
+    def _on_po_selected(self, event=None):
+        if not hasattr(self, 'po_num_entry') or not hasattr(self, 'po_info_lbl'):
+            return
+        po_num = self.po_num_entry.get().strip()
+        if not po_num:
+            self.po_info_lbl.config(text="")
+            return
+
+        try:
+            from models.customer_po import CustomerPOModel
+            po = CustomerPOModel.get_by_po_number(po_num)
+            if po:
+                bal_kg = _to_float(po.get('balance_qty_kg', 0.0))
+                st = po.get('status', 'Open')
+                self.po_info_lbl.config(
+                    text=f"⚖️ PO Bal: {bal_kg:,.2f} KG ({st})",
+                    fg=COLORS["success"] if bal_kg > 0 else COLORS["danger"]
+                )
+                if po.get('po_date') and not self.po_date_entry.get().strip():
+                    self.po_date_entry.delete(0, tk.END)
+                    self.po_date_entry.insert(0, po['po_date'])
+            else:
+                self.po_info_lbl.config(text="")
+        except Exception:
+            self.po_info_lbl.config(text="")
+
     def _quick_add_customer(self):
         from ui.components.dialogs import ContactDialog
         ContactDialog(self, contact_data={'contact_type': 'Customer'}, on_save=self._on_customer_created)
 
     def _on_customer_created(self, new_id=None):
         self.customers = ContactModel.get_all("Customer")
-        cust_labels = [f"{c['name']} ({c.get('gstin', 'No GSTIN')})" for c in self.customers]
+        cust_labels = self._get_customer_labels()
         self.cust_combo['values'] = cust_labels
 
         if new_id:
@@ -591,4 +843,6 @@ class InvoiceDialog(tk.Toplevel):
                     break
         elif cust_labels:
             self.cust_combo.current(len(cust_labels) - 1)
+        self._on_customer_change()
+
 

@@ -99,6 +99,8 @@ class ItemModel:
             sql += " AND current_stock <= reorder_level AND current_stock > 0"
         elif stock_filter == "Out of Stock":
             sql += " AND current_stock <= 0"
+        elif stock_filter == "Low or Out":
+            sql += " AND current_stock <= reorder_level"
         elif stock_filter == "In Stock":
             sql += " AND current_stock > reorder_level"
 

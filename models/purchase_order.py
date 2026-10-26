@@ -9,7 +9,7 @@ class PurchaseOrderModel:
     @staticmethod
     def get_all():
         sql = """
-        SELECT po.*, c.name as supplier_name, c.company_name
+        SELECT po.*, c.name as supplier_name, c.company_name, c.gstin as supplier_gstin, c.phone as supplier_phone
         FROM purchase_orders po
         JOIN contacts c ON po.supplier_id = c.id
         ORDER BY po.id DESC
@@ -19,7 +19,9 @@ class PurchaseOrderModel:
     @staticmethod
     def get_by_id(po_id):
         po = db.fetch_one("""
-        SELECT po.*, c.name as supplier_name, c.company_name, c.address as supplier_address
+        SELECT po.*, c.name as supplier_name, c.company_name, c.address as supplier_address,
+               c.gstin as supplier_gstin, c.pan as supplier_pan, c.phone as supplier_phone,
+               c.email as supplier_email, c.place_of_supply as supplier_pos
         FROM purchase_orders po
         JOIN contacts c ON po.supplier_id = c.id
         WHERE po.id = ?
@@ -45,8 +47,10 @@ class PurchaseOrderModel:
             status = po_data.get('status', 'Issued')
 
             sql_po = """
-            INSERT INTO purchase_orders (po_number, supplier_id, order_date, expected_date, status, subtotal, cgst_amount, sgst_amount, total_amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO purchase_orders (
+                po_number, supplier_id, order_date, expected_date, status,
+                subtotal, freight, cgst_amount, sgst_amount, igst_amount, round_off, total_amount, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.execute(sql_po, (
                 po_number,
@@ -54,9 +58,12 @@ class PurchaseOrderModel:
                 po_data.get('order_date'),
                 po_data.get('expected_date'),
                 status,
-                float(po_data.get('subtotal', po_data.get('total_amount', 0))),
+                float(po_data.get('subtotal', 0)),
+                float(po_data.get('freight', 0)),
                 float(po_data.get('cgst_amount', 0)),
                 float(po_data.get('sgst_amount', 0)),
+                float(po_data.get('igst_amount', 0)),
+                float(po_data.get('round_off', 0)),
                 float(po_data.get('total_amount', 0)),
                 po_data.get('notes', '')
             ))
@@ -98,9 +105,17 @@ class PurchaseOrderModel:
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (item_id, 'Add', qty, 'Purchase Order Received', 'Admin', f"Stock received via PO #{po_number}{notes_sub}")
-                    )
-
             conn.commit()
+
+            # Sync payment with Payments table and recalculate Supplier balance
+            try:
+                from models.payment import PaymentModel
+                pay_st = po_data.get('payment_status') or ('Paid' if status == 'Paid' else 'Unpaid')
+                is_paid = (pay_st.lower() == 'paid' or status.lower() == 'paid') and status != 'Cancelled'
+                PaymentModel.sync_purchase_order_payment(po_id, is_paid=is_paid)
+            except Exception as e:
+                print(f"[PurchaseOrderModel] Payment sync error on create: {e}")
+
             return po_id
 
     @staticmethod
@@ -133,7 +148,8 @@ class PurchaseOrderModel:
             sql_po = """
             UPDATE purchase_orders SET
                 po_number = ?, supplier_id = ?, order_date = ?, expected_date = ?, status = ?,
-                subtotal = ?, cgst_amount = ?, sgst_amount = ?, total_amount = ?, notes = ?
+                subtotal = ?, freight = ?, cgst_amount = ?, sgst_amount = ?, igst_amount = ?,
+                round_off = ?, total_amount = ?, notes = ?
             WHERE id = ?
             """
             cursor.execute(sql_po, (
@@ -142,9 +158,12 @@ class PurchaseOrderModel:
                 po_data.get('order_date'),
                 po_data.get('expected_date'),
                 new_status,
-                float(po_data.get('subtotal', po_data.get('total_amount', 0))),
+                float(po_data.get('subtotal', 0)),
+                float(po_data.get('freight', 0)),
                 float(po_data.get('cgst_amount', 0)),
                 float(po_data.get('sgst_amount', 0)),
+                float(po_data.get('igst_amount', 0)),
+                float(po_data.get('round_off', 0)),
                 float(po_data.get('total_amount', 0)),
                 po_data.get('notes', ''),
                 po_id
@@ -192,21 +211,43 @@ class PurchaseOrderModel:
 
             conn.commit()
 
+            # Sync payment with Payments table and recalculate Supplier balance
+            try:
+                from models.payment import PaymentModel
+                pay_st = po_data.get('payment_status') or ('Paid' if new_status == 'Paid' else 'Unpaid')
+                is_paid = (pay_st.lower() == 'paid' or new_status.lower() == 'paid') and new_status != 'Cancelled'
+                PaymentModel.sync_purchase_order_payment(po_id, is_paid=is_paid)
+            except Exception as e:
+                print(f"[PurchaseOrderModel] Payment sync error on update: {e}")
+
     @staticmethod
-    def update_status(po_id, new_status):
+    def update_status(po_id, new_status=None, payment_status=None, status=None):
         po = PurchaseOrderModel.get_by_id(po_id)
         if not po:
             return
 
-        old_status = po['status']
-        if old_status == new_status:
-            return
+        old_status = po.get('status', 'Draft')
+        target = new_status or status or 'Received'
+        target_str = str(target).strip()
+        
+        # Payment status determination
+        if payment_status:
+            pay_st = payment_status
+        elif target_str.lower() in ('paid',):
+            pay_st = 'Paid'
+        elif target_str.lower() in ('unpaid',):
+            pay_st = 'Unpaid'
+        else:
+            pay_st = po.get('payment_status') or 'Unpaid'
+
+        # Main PO lifecycle status
+        db_status = target_str if target_str in ('Draft', 'Issued', 'Received', 'Cancelled') else old_status
 
         po_number = po.get('po_number', f"PO-{po_id}")
         with db.get_connection() as conn:
             cursor = conn.cursor()
             # If updated to Received, increment stock and log stock adjustment
-            if new_status == 'Received' and old_status != 'Received':
+            if db_status == 'Received' and old_status != 'Received':
                 for item in po.get('items', []):
                     qty = float(item['quantity'])
                     item_id = item['item_id']
@@ -218,7 +259,7 @@ class PurchaseOrderModel:
                         """,
                         (item_id, 'Add', qty, 'Purchase Order Received', 'Admin', f"Stock received via PO #{po_number}")
                     )
-            elif old_status == 'Received' and new_status != 'Received':
+            elif old_status == 'Received' and db_status != 'Received':
                 for item in po.get('items', []):
                     qty = float(item['quantity'])
                     item_id = item['item_id']
@@ -228,11 +269,24 @@ class PurchaseOrderModel:
                         INSERT INTO stock_adjustments (item_id, adjustment_type, quantity, reason, adjusted_by, notes)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
-                        (item_id, 'Remove', qty, 'PO Status Changed', 'Admin', f"Stock reverted (PO #{po_number} changed to {new_status})")
+                        (item_id, 'Remove', qty, 'PO Status Changed', 'Admin', f"Stock reverted (PO #{po_number} changed to {db_status})")
                     )
 
-            cursor.execute("UPDATE purchase_orders SET status = ? WHERE id = ?", (new_status, po_id))
+            try:
+                cursor.execute("UPDATE purchase_orders SET status = ?, payment_status = ? WHERE id = ?", (db_status, pay_st, po_id))
+            except Exception:
+                cursor.execute("UPDATE purchase_orders SET status = ? WHERE id = ?", (db_status, po_id))
+
             conn.commit()
+
+        # Sync payment with Payments table and recalculate Supplier balance
+        try:
+            from models.payment import PaymentModel
+            is_paid = (pay_st.lower() == 'paid' or db_status.lower() == 'paid') and db_status != 'Cancelled'
+            PaymentModel.sync_purchase_order_payment(po_id, is_paid=is_paid)
+        except Exception as e:
+            print(f"[PurchaseOrderModel] Status sync payment error: {e}")
+
 
     @staticmethod
     def delete_many(po_ids):

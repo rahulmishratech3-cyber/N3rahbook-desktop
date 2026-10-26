@@ -22,13 +22,13 @@ class ContactsView(tk.Frame):
         tk.Label(ctrl_bar, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=4)
         self.search_entry = ttk.Entry(ctrl_bar, width=20)
         self.search_entry.pack(side="left", padx=4)
-        self.search_entry.bind("<KeyRelease>", lambda e: self.refresh_data())
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
 
         tk.Label(ctrl_bar, text="Type:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=6)
         self.type_combo = ttk.Combobox(ctrl_bar, values=["All", "Customer", "Supplier"], state="readonly", width=12)
         self.type_combo.current(0)
         self.type_combo.pack(side="left", padx=4)
-        self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data())
+        self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data(sync_balances=False))
 
         ttk.Button(ctrl_bar, text="🗑️ Delete", style="Secondary.TButton", command=self._delete_contact).pack(side="right", padx=4)
         ttk.Button(ctrl_bar, text="📜 Party Ledger", style="Secondary.TButton", command=self._view_ledger).pack(side="right", padx=4)
@@ -40,21 +40,26 @@ class ContactsView(tk.Frame):
         table_container.pack(fill="both", expand=True, padx=20, pady=5)
 
         cols = [
-            ("name", "Contact Name", 160, "w"),
-            ("company_name", "Company Name", 190, "w"),
-            ("contact_type", "Type", 90, "center"),
-            ("phone", "Phone", 110, "center"),
-            ("address", "Address", 220, "w"),
-            ("gstin", "GSTIN", 130, "center"),
-            ("balance", "Outstanding Due (₹)", 140, "e")
+            ("name", "Contact / Owner Name", 210, "w"),
+            ("company_name", "Business / Company Name", 250, "w"),
+            ("contact_type", "Party Type", 95, "center"),
+            ("phone", "Mobile / Phone", 120, "center"),
+            ("address", "Full Business Address", 340, "w"),
+            ("gstin", "GSTIN", 150, "center"),
+            ("balance", "Outstanding Due (₹)", 150, "e")
         ]
-        self.table = DataTable(table_container, cols, on_double_click=self._view_ledger)
+        self.table = DataTable(table_container, cols, on_double_click=self._edit_contact)
         self.table.pack(fill="both", expand=True, padx=10, pady=10)
 
-    def refresh_data(self):
-        # Ensure balances are up to date
-        from models.payment import PaymentModel
-        PaymentModel.recalculate_all_balances()
+    def _on_search_key(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, lambda: self.refresh_data(sync_balances=False))
+
+    def refresh_data(self, sync_balances=True):
+        if sync_balances:
+            from models.payment import PaymentModel
+            PaymentModel.recalculate_all_balances()
 
         query = self.search_entry.get().strip()
         ctype = self.type_combo.get()
@@ -62,14 +67,14 @@ class ContactsView(tk.Frame):
         display_c = []
         for c in contacts:
             row = dict(c)
-            bal = c.get('balance', 0.0)
-            tag = " (Due)" if bal > 0 else " (Paid)"
+            bal = float(c.get('balance') or 0.0)
+            tag = " (Due)" if bal > 0 else (" (Settled)" if bal == 0 else " (Advance)")
             row['balance'] = f"₹ {bal:,.2f}{tag}"
             display_c.append(row)
         self.table.load_data(display_c)
 
     def _add_contact(self):
-        ContactDialog(self, on_save=self.refresh_data)
+        ContactDialog(self, on_save=lambda: self.refresh_data(sync_balances=True))
 
     def _edit_contact(self, contact_row=None):
         selected = contact_row or self.table.get_selected_item()
@@ -79,17 +84,17 @@ class ContactsView(tk.Frame):
 
         contact = ContactModel.get_by_id(selected['id'])
         if contact:
-            ContactDialog(self, contact_data=contact, on_save=self.refresh_data)
+            ContactDialog(self, contact_data=contact, on_save=lambda: self.refresh_data(sync_balances=True))
 
     def _record_payment(self):
         selected = self.table.get_selected_item()
         c_id = selected['id'] if selected else None
-        PaymentDialog(self, contact_id=c_id, on_save=self.refresh_data)
+        PaymentDialog(self, contact_id=c_id, on_save=lambda: self.refresh_data(sync_balances=True))
 
     def _view_ledger(self, contact_row=None):
         selected = contact_row or self.table.get_selected_item()
         c_id = selected['id'] if selected else None
-        PartyLedgerDialog(self, contact_id=c_id, on_close=self.refresh_data)
+        PartyLedgerDialog(self, contact_id=c_id, on_close=lambda: self.refresh_data(sync_balances=False))
 
     def _delete_contact(self):
         selected_items = self.table.get_selected_items()
@@ -127,7 +132,7 @@ class ContactsView(tk.Frame):
                     msg += f"\n\n🛡️ Safety Backup Saved:\nexports/backups/{backup_file}"
                     
                 messagebox.showinfo("Deleted Successfully", msg, parent=self)
-                self.refresh_data()
+                self.refresh_data(sync_balances=True)
             except Exception as ex:
                 messagebox.showerror("Delete Failed", f"An error occurred while deleting contact(s):\n{str(ex)}", parent=self)
 

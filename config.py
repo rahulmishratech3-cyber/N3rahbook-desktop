@@ -63,6 +63,8 @@ FONTS = {
     "body": ("Segoe UI", 12),
     "body_bold": ("Segoe UI", 12, "bold"),
     "small": ("Segoe UI", 11),
+    "small_bold": ("Segoe UI", 11, "bold"),
+    "caption": ("Segoe UI", 10),
     "mono": ("Consolas", 12),
 }
 

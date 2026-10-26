@@ -175,17 +175,19 @@ class ItemDialog(tk.Toplevel):
 class ContactDialog(tk.Toplevel):
     def __init__(self, parent, contact_data=None, on_save=None):
         super().__init__(parent)
-        self.title("Edit Contact" if contact_data else "Add New Contact")
+        self.contact_data = contact_data or {}
+        self.on_save = on_save
+        self.entries = {}
+
+        is_edit = bool(self.contact_data.get('id'))
+        party_name = self.contact_data.get('company_name') or self.contact_data.get('name') or ''
+        self.title(f"✏️ Edit Contact - {party_name}" if is_edit and party_name else ("✏️ Edit Contact" if is_edit else "👥 Add New Contact"))
         self.geometry("640x640")
         self.minsize(580, 520)
         self.configure(bg=COLORS["bg_dark"])
         self.resizable(True, True)
         self.transient(parent)
         self.grab_set()
-
-        self.contact_data = contact_data or {}
-        self.on_save = on_save
-        self.entries = {}
 
         self._build_ui()
 
@@ -194,7 +196,9 @@ class ContactDialog(tk.Toplevel):
         h_frame = tk.Frame(self, bg=COLORS["bg_header"], padx=20, pady=14)
         h_frame.pack(fill="x", side="top")
 
-        title_txt = "✏️ Edit Contact Details" if self.contact_data else "👥 Add New Contact"
+        is_edit = bool(self.contact_data.get('id'))
+        party_name = self.contact_data.get('company_name') or self.contact_data.get('name') or ''
+        title_txt = f"✏️ Edit Contact Details - {party_name}" if is_edit and party_name else ("✏️ Edit Contact Details" if is_edit else "👥 Add New Contact")
         tk.Label(h_frame, text=title_txt, font=FONTS["heading"], bg=COLORS["bg_header"], fg=COLORS["text_light"]).pack(anchor="w")
 
         # 2. Action Buttons (Pinned to Bottom)
@@ -500,8 +504,14 @@ class PurchaseDialog(tk.Toplevel):
 
         title_txt = f"✏️ Edit Purchase Order" if po_id else ("🛒 Direct Purchase Entry" if default_status == "Received" else "📋 Purchase Order")
         self.title(title_txt)
-        self.geometry("1140x780")
-        self.minsize(1040, 660)
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        dlg_w = min(1140, max(940, screen_w - 60))
+        dlg_h = min(730, max(560, screen_h - 80))
+        dlg_x = max(10, (screen_w - dlg_w) // 2)
+        dlg_y = max(10, (screen_h - dlg_h) // 2 - 20)
+        self.geometry(f"{dlg_w}x{dlg_h}+{dlg_x}+{dlg_y}")
+        self.minsize(940, 540)
         self.configure(bg=COLORS["bg_dark"])
         self.transient(parent)
         self.grab_set()
@@ -516,12 +526,65 @@ class PurchaseDialog(tk.Toplevel):
         else:
             self._add_line_item_row()
 
+    def _get_supplier_labels(self):
+        labels = []
+        for s in self.suppliers:
+            comp = str(s.get('company_name') or '').strip()
+            name = str(s.get('name') or '').strip()
+            addr = str(s.get('address') or '').strip()
+            label = comp if comp else name
+            if comp and name and comp.lower() != name.lower():
+                label = f"{comp} ({name})"
+            if addr and addr.lower() != 'n/a':
+                label += f" — 📍 {addr}"
+            labels.append(label)
+        return labels
+
     def _refresh_suppliers(self):
         self.suppliers = ContactModel.get_all("Supplier")
-        sup_names = [f"{s['name']} ({s.get('company_name') or 'Supplier'})" for s in self.suppliers]
+        sup_names = self._get_supplier_labels()
         self.sup_combo.config(values=sup_names)
         if sup_names:
             self.sup_combo.current(len(sup_names) - 1)
+        self._on_supplier_change()
+
+    def _on_supplier_change(self):
+        if not hasattr(self, 'sup_addr_lbl') or not self.suppliers:
+            return
+        idx = self.sup_combo.current()
+        if 0 <= idx < len(self.suppliers):
+            s = self.suppliers[idx]
+            addr = str(s.get('address') or 'N/A').strip()
+            gstin = str(s.get('gstin') or 'N/A').strip()
+            phone = str(s.get('phone') or '').strip()
+            txt = f"📍 Address: {addr}"
+            if gstin and gstin != 'N/A':
+                txt += f"  |  GSTIN: {gstin}"
+            if phone:
+                txt += f"  |  Mob: {phone}"
+            self.sup_addr_lbl.config(text=txt)
+
+            # Auto-detect Inter-State (IGST) vs Intra-State (CGST + SGST) for supplier
+            if hasattr(self, 'gst_mode_combo') and not self.po_id:
+                pos = str(s.get('place_of_supply') or '').strip().lower()
+                gstin_clean = gstin.strip().upper()
+                addr_lower = addr.lower()
+
+                is_igst = False
+                if len(gstin_clean) >= 2 and gstin_clean[:2].isdigit():
+                    if gstin_clean[:2] != '09':
+                        is_igst = True
+                elif pos and pos not in ('uttar pradesh', 'up'):
+                    is_igst = True
+                elif not pos and addr_lower:
+                    if any(st in addr_lower for st in ['delhi', 'haryana', 'rajasthan', 'punjab', 'maharashtra', 'gujarat', 'madhya pradesh', 'bihar', 'uttarakhand', 'karnataka', 'tamil nadu', 'telangana', 'west bengal', 'odisha', 'chandigarh']):
+                        is_igst = True
+
+                if is_igst:
+                    self.gst_mode_combo.set("18% IGST (Inter-State)")
+                else:
+                    self.gst_mode_combo.set("18% GST (9% CGST + 9% SGST)")
+                self._recalculate_totals()
 
     def _quick_add_supplier(self):
         ContactDialog(self, contact_data={'contact_type': 'Supplier'}, on_save=self._refresh_suppliers)
@@ -541,9 +604,14 @@ class PurchaseDialog(tk.Toplevel):
         btn_bar = tk.Frame(self, bg=COLORS["bg_dark"], padx=20, pady=12)
         btn_bar.pack(fill="x", side="bottom")
 
+        if self.po_id:
+            ttk.Button(btn_bar, text="📄 Export PDF", style="Secondary.TButton", command=self._export_current_pdf).pack(side="left", padx=5)
+
         ttk.Button(btn_bar, text="Cancel", style="Secondary.TButton", command=self.destroy).pack(side="right", padx=5)
+        
         save_txt = "💾 Update Purchase" if self.po_id else ("💾 Save & Add to Stock" if self.default_status == "Received" else "💾 Save Purchase Order")
-        ttk.Button(btn_bar, text=save_txt, style="Primary.TButton", command=lambda: self._save(self.status_combo.get())).pack(side="right", padx=5)
+        ttk.Button(btn_bar, text=save_txt, style="Secondary.TButton", command=lambda: self._save(self.status_combo.get(), open_pdf=False)).pack(side="right", padx=5)
+        ttk.Button(btn_bar, text="🖨️ Save & View PDF", style="Primary.TButton", command=lambda: self._save(self.status_combo.get(), open_pdf=True)).pack(side="right", padx=5)
 
         # 3. Main Form Scrollable Container
         outer_container = tk.Frame(self, bg=COLORS["bg_dark"])
@@ -554,16 +622,22 @@ class PurchaseDialog(tk.Toplevel):
         meta_box.pack(fill="x", pady=(0, 10))
 
         # Metadata Row
-        tk.Label(meta_box, text="Supplier *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=6, pady=2)
+        tk.Label(meta_box, text="Supplier / Vendor *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=6, pady=2)
         sup_frame = tk.Frame(meta_box, bg=COLORS["bg_card"])
-        sup_frame.grid(row=1, column=0, sticky="w", padx=6, pady=(0, 4))
+        sup_frame.grid(row=1, column=0, sticky="w", padx=6, pady=(0, 2))
 
-        sup_names = [f"{s['name']} ({s.get('company_name') or 'Supplier'})" for s in self.suppliers]
-        self.sup_combo = ttk.Combobox(sup_frame, values=sup_names, state="readonly", width=28)
+        sup_names = self._get_supplier_labels()
+        self.sup_combo = ttk.Combobox(sup_frame, values=sup_names, state="readonly", width=38)
         self.sup_combo.pack(side="left", padx=(0, 6))
         if sup_names:
             self.sup_combo.current(0)
         ttk.Button(sup_frame, text="➕ New", style="Secondary.TButton", command=self._quick_add_supplier).pack(side="left")
+
+        # Live Supplier Address Preview Label
+        self.sup_addr_lbl = tk.Label(meta_box, text="", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["accent"], wraplength=400, justify="left")
+        self.sup_addr_lbl.grid(row=2, column=0, sticky="w", padx=6, pady=(0, 4))
+        self.sup_combo.bind("<<ComboboxSelected>>", lambda e: self._on_supplier_change())
+        self._on_supplier_change()
 
         tk.Label(meta_box, text="Supplier Invoice / PO #", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
         self.inv_num_entry = ttk.Entry(meta_box, width=18)
@@ -586,7 +660,7 @@ class PurchaseDialog(tk.Toplevel):
         self.exp_date_entry.grid(row=1, column=4, sticky="w", padx=6, pady=(0, 4))
 
         tk.Label(meta_box, text="GST Tax Applied", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).grid(row=0, column=5, sticky="w", padx=6, pady=2)
-        self.gst_mode_combo = ttk.Combobox(meta_box, values=["18% GST (9% CGST + 9% SGST)", "None (0% / Exempt)"], state="readonly", width=22)
+        self.gst_mode_combo = ttk.Combobox(meta_box, values=["18% GST (9% CGST + 9% SGST)", "18% IGST (Inter-State)", "None (0% / Exempt)"], state="readonly", width=24)
         self.gst_mode_combo.current(0)
         self.gst_mode_combo.grid(row=1, column=5, sticky="w", padx=6, pady=(0, 4))
         self.gst_mode_combo.bind("<<ComboboxSelected>>", lambda e: self._recalculate_totals())
@@ -665,25 +739,44 @@ class PurchaseDialog(tk.Toplevel):
         self.lbl_subtotal = tk.Label(r_sub, text="₹ 0.00", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
         self.lbl_subtotal.pack(side="left")
 
+        # Row: Freight / Fare (₹)
+        r_freight = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        r_freight.pack(anchor="e", pady=1)
+        tk.Label(r_freight, text="🚚 Freight / Fare (₹): ", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["text_dark"]).pack(side="left")
+        self.freight_entry = ttk.Entry(r_freight, width=12, justify="right")
+        self.freight_entry.insert(0, "0.00")
+        self.freight_entry.pack(side="left")
+        self.freight_entry.bind("<KeyRelease>", lambda e: self._recalculate_totals())
+
         # Row: CGST (9%)
-        r_cgst = tk.Frame(tot_right, bg=COLORS["bg_card"])
-        r_cgst.pack(anchor="e", pady=1)
-        tk.Label(r_cgst, text="CGST @ 9%: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
-        self.lbl_cgst = tk.Label(r_cgst, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
+        self.r_cgst = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        tk.Label(self.r_cgst, text="CGST @ 9%: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
+        self.lbl_cgst = tk.Label(self.r_cgst, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
         self.lbl_cgst.pack(side="left")
 
         # Row: SGST (9%)
-        r_sgst = tk.Frame(tot_right, bg=COLORS["bg_card"])
-        r_sgst.pack(anchor="e", pady=1)
-        tk.Label(r_sgst, text="SGST @ 9%: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
-        self.lbl_sgst = tk.Label(r_sgst, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
+        self.r_sgst = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        tk.Label(self.r_sgst, text="SGST @ 9%: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
+        self.lbl_sgst = tk.Label(self.r_sgst, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
         self.lbl_sgst.pack(side="left")
 
+        # Row: IGST (18%)
+        self.r_igst = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        tk.Label(self.r_igst, text="IGST @ 18%: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
+        self.lbl_igst = tk.Label(self.r_igst, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_light"], width=14, anchor="e")
+        self.lbl_igst.pack(side="left")
+
+        # Row: Round Off
+        self.r_roundoff = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        tk.Label(self.r_roundoff, text="Round Off: ", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left")
+        self.lbl_round_off = tk.Label(self.r_roundoff, text="₹ 0.00", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"], width=14, anchor="e")
+        self.lbl_round_off.pack(side="left")
+
         # Row: Total Purchase Amount
-        r_tot = tk.Frame(tot_right, bg=COLORS["bg_card"])
-        r_tot.pack(anchor="e", pady=(4, 0))
-        tk.Label(r_tot, text="Total Purchase Amount: ", font=("Segoe UI", 12, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"]).pack(side="left")
-        self.lbl_grand_total = tk.Label(r_tot, text="₹ 0.00", font=("Segoe UI", 13, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"], width=14, anchor="e")
+        self.r_tot = tk.Frame(tot_right, bg=COLORS["bg_card"])
+        self.r_tot.pack(anchor="e", pady=(4, 0))
+        tk.Label(self.r_tot, text="Total Purchase Amount: ", font=("Segoe UI", 12, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"]).pack(side="left")
+        self.lbl_grand_total = tk.Label(self.r_tot, text="₹ 0.00", font=("Segoe UI", 13, "bold"), bg=COLORS["bg_card"], fg=COLORS["success"], width=14, anchor="e")
         self.lbl_grand_total.pack(side="left")
 
     def _add_line_item_row(self):
@@ -815,27 +908,91 @@ class PurchaseDialog(tk.Toplevel):
             except ValueError:
                 r['lbl_tot'].config(text="₹ 0.00")
 
+        try:
+            freight = float(self.freight_entry.get().strip() or 0)
+        except (ValueError, AttributeError):
+            freight = 0.0
+
+        taxable_total = subtotal + freight
         gst_mode = self.gst_mode_combo.get() if hasattr(self, 'gst_mode_combo') else "18% GST (9% CGST + 9% SGST)"
-        if "18%" in gst_mode or "9%" in gst_mode:
-            cgst = subtotal * 0.09
-            sgst = subtotal * 0.09
-            grand_tot = round(subtotal + cgst + sgst)
+
+        target_before = self.r_tot if hasattr(self, 'r_tot') else None
+
+        if "IGST" in gst_mode:
+            cgst = 0.0
+            sgst = 0.0
+            igst = taxable_total * 0.18
+            if hasattr(self, 'r_cgst'): self.r_cgst.pack_forget()
+            if hasattr(self, 'r_sgst'): self.r_sgst.pack_forget()
+            if hasattr(self, 'r_igst'):
+                try:
+                    if target_before:
+                        self.r_igst.pack(anchor="e", pady=1, before=target_before)
+                    else:
+                        self.r_igst.pack(anchor="e", pady=1)
+                except Exception:
+                    self.r_igst.pack(anchor="e", pady=1)
+                self.lbl_igst.config(text=f"₹ {igst:,.2f}")
+        elif "18%" in gst_mode or "9%" in gst_mode:
+            cgst = taxable_total * 0.09
+            sgst = taxable_total * 0.09
+            igst = 0.0
+            if hasattr(self, 'r_igst'): self.r_igst.pack_forget()
+            if hasattr(self, 'r_cgst'):
+                try:
+                    if target_before:
+                        self.r_cgst.pack(anchor="e", pady=1, before=target_before)
+                    else:
+                        self.r_cgst.pack(anchor="e", pady=1)
+                except Exception:
+                    self.r_cgst.pack(anchor="e", pady=1)
+                self.lbl_cgst.config(text=f"₹ {cgst:,.2f}")
+            if hasattr(self, 'r_sgst'):
+                try:
+                    if target_before:
+                        self.r_sgst.pack(anchor="e", pady=1, before=target_before)
+                    else:
+                        self.r_sgst.pack(anchor="e", pady=1)
+                except Exception:
+                    self.r_sgst.pack(anchor="e", pady=1)
+                self.lbl_sgst.config(text=f"₹ {sgst:,.2f}")
         else:
             cgst = 0.0
             sgst = 0.0
-            grand_tot = round(subtotal)
+            igst = 0.0
+            if hasattr(self, 'r_igst'): self.r_igst.pack_forget()
+            if hasattr(self, 'r_cgst'): self.r_cgst.pack_forget()
+            if hasattr(self, 'r_sgst'): self.r_sgst.pack_forget()
+
+        raw_total = taxable_total + cgst + sgst + igst
+        grand_tot = round(raw_total)
+        round_off = grand_tot - raw_total
 
         self.lbl_subtotal.config(text=f"₹ {subtotal:,.2f}")
-        self.lbl_cgst.config(text=f"₹ {cgst:,.2f}")
-        self.lbl_sgst.config(text=f"₹ {sgst:,.2f}")
+        if hasattr(self, 'r_roundoff'):
+            if round_off != 0.0:
+                try:
+                    if target_before:
+                        self.r_roundoff.pack(anchor="e", pady=1, before=target_before)
+                    else:
+                        self.r_roundoff.pack(anchor="e", pady=1)
+                except Exception:
+                    self.r_roundoff.pack(anchor="e", pady=1)
+                self.lbl_round_off.config(text=f"{round_off:+.2f}")
+            else:
+                self.r_roundoff.pack_forget()
+
         self.lbl_grand_total.config(text=f"₹ {grand_tot:,.2f}")
 
         from services.num2words_service import number_to_words_indian
         words = number_to_words_indian(grand_tot)
         self.words_lbl.config(text=f"Total in Words: {words}")
 
-    def _save(self, target_status):
+    def _save(self, target_status, open_pdf=False):
+        import os
+        import subprocess
         from models.purchase_order import PurchaseOrderModel
+        from services.pdf_service import generate_purchase_invoice_pdf
         try:
             if not self.suppliers:
                 messagebox.showerror("Supplier Required", "No supplier found! Please add a supplier first using the '➕ New' button.", parent=self)
@@ -876,22 +1033,36 @@ class PurchaseDialog(tk.Toplevel):
                     'item_id': itm['id'],
                     'item_name': itm['name'],
                     'subcategory': subcat_val,
-                    'hsn_code': r['entry_hsn'].get().strip() or '00000000',
+                    'hsn_code': r['entry_hsn'].get().strip() or '39211310',
                     'quantity': qty,
                     'unit': r['entry_unit'].get().strip() or 'PCS',
                     'unit_cost': cost,
                     'total_cost': tot
                 })
 
+            try:
+                freight = float(self.freight_entry.get().strip() or 0)
+            except (ValueError, AttributeError):
+                freight = 0.0
+
+            taxable_total = subtotal + freight
             gst_mode = self.gst_mode_combo.get() if hasattr(self, 'gst_mode_combo') else "18% GST (9% CGST + 9% SGST)"
-            if "18%" in gst_mode or "9%" in gst_mode:
-                cgst = subtotal * 0.09
-                sgst = subtotal * 0.09
-                grand_tot = round(subtotal + cgst + sgst)
+            if "IGST" in gst_mode:
+                cgst = 0.0
+                sgst = 0.0
+                igst = taxable_total * 0.18
+            elif "18%" in gst_mode or "9%" in gst_mode:
+                cgst = taxable_total * 0.09
+                sgst = taxable_total * 0.09
+                igst = 0.0
             else:
                 cgst = 0.0
                 sgst = 0.0
-                grand_tot = round(subtotal)
+                igst = 0.0
+
+            raw_tot = taxable_total + cgst + sgst + igst
+            grand_tot = round(raw_tot)
+            round_off = grand_tot - raw_tot
 
             po_data = {
                 'po_number': po_num,
@@ -900,18 +1071,39 @@ class PurchaseDialog(tk.Toplevel):
                 'expected_date': self.exp_date_entry.get().strip(),
                 'status': target_status,
                 'subtotal': subtotal,
+                'freight': freight,
                 'cgst_amount': cgst,
                 'sgst_amount': sgst,
+                'igst_amount': igst,
+                'round_off': round_off,
                 'total_amount': grand_tot,
                 'notes': f"Recorded via Desktop App ({target_status})"
             }
 
+            saved_id = self.po_id
             if self.po_id:
                 PurchaseOrderModel.update(self.po_id, po_data, item_rows)
                 msg = f"Purchase #{po_num} updated successfully and inventory stock synchronized!"
             else:
-                PurchaseOrderModel.create(po_data, item_rows)
+                saved_id = PurchaseOrderModel.create(po_data, item_rows)
                 msg = f"Purchase #{po_num} recorded and stock levels successfully updated!" if target_status == 'Received' else f"Purchase Order #{po_num} created with status '{target_status}'."
+
+            if open_pdf and saved_id:
+                try:
+                    full_po = PurchaseOrderModel.get_by_id(saved_id) or po_data
+                    pdf_path = generate_purchase_invoice_pdf(
+                        po=full_po,
+                        supplier=sup,
+                        items=full_po.get('items', item_rows),
+                        page_size="A4"
+                    )
+                    if os.name == 'nt':
+                        os.startfile(pdf_path)
+                    else:
+                        subprocess.run(['xdg-open', pdf_path])
+                    msg += f"\n\nGenerated Tax Invoice PDF:\n{pdf_path}"
+                except Exception as p_err:
+                    print(f"PDF generation error: {p_err}")
 
             if self.on_save:
                 self.on_save()
@@ -921,6 +1113,33 @@ class PurchaseDialog(tk.Toplevel):
 
         except Exception as ex:
             messagebox.showerror("Error", f"Failed to save purchase: {str(ex)}", parent=self)
+
+    def _export_current_pdf(self):
+        import os
+        import subprocess
+        from models.purchase_order import PurchaseOrderModel
+        from services.pdf_service import generate_purchase_invoice_pdf
+        if not self.po_id:
+            return
+        try:
+            po = PurchaseOrderModel.get_by_id(self.po_id)
+            if not po:
+                return
+            s_idx = self.sup_combo.current()
+            sup = self.suppliers[s_idx] if (0 <= s_idx < len(self.suppliers)) else {}
+            pdf_path = generate_purchase_invoice_pdf(
+                po=po,
+                supplier=sup,
+                items=po.get('items', []),
+                page_size="A4"
+            )
+            if os.name == 'nt':
+                os.startfile(pdf_path)
+            else:
+                subprocess.run(['xdg-open', pdf_path])
+            messagebox.showinfo("PDF Generated", f"Purchase Invoice PDF saved:\n{pdf_path}", parent=self)
+        except Exception as ex:
+            messagebox.showerror("Error", f"Failed to generate PDF: {str(ex)}", parent=self)
 
     def _load_existing_po(self):
         from models.purchase_order import PurchaseOrderModel
@@ -950,8 +1169,15 @@ class PurchaseDialog(tk.Toplevel):
             self.exp_date_entry.delete(0, tk.END)
             self.exp_date_entry.insert(0, po.get('expected_date', ''))
 
+            if hasattr(self, 'freight_entry'):
+                self.freight_entry.delete(0, tk.END)
+                self.freight_entry.insert(0, f"{float(po.get('freight', 0.0) or 0.0):.2f}")
+
+            igst = float(po.get('igst_amount', 0.0) or 0.0)
             cgst = float(po.get('cgst_amount', 0.0) or 0.0)
-            if cgst > 0:
+            if igst > 0:
+                self.gst_mode_combo.set("18% IGST (Inter-State)")
+            elif cgst > 0:
                 self.gst_mode_combo.set("18% GST (9% CGST + 9% SGST)")
             else:
                 self.gst_mode_combo.set("None (0% / Exempt)")
@@ -1155,9 +1381,9 @@ class PaymentDialog(tk.Toplevel):
 
         # 1. Contact Selector
         tk.Label(card, text="Select Party / Contact *", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(anchor="w", pady=(4, 1))
-        contact_labels = [f"{c['name']} ({c['contact_type']}) - Bal: ₹{c['balance']:,.2f}" for c in self.contacts]
-        self.contact_combo = ttk.Combobox(card, values=contact_labels, state="readonly", width=48)
-        self.contact_combo.pack(anchor="w", pady=(0, 6))
+        contact_labels = self._get_contact_labels()
+        self.contact_combo = ttk.Combobox(card, values=contact_labels, state="readonly", width=56)
+        self.contact_combo.pack(anchor="w", pady=(0, 4))
 
         # Select initial contact if provided
         sel_idx = 0
@@ -1169,7 +1395,10 @@ class PaymentDialog(tk.Toplevel):
         if contact_labels:
             self.contact_combo.current(sel_idx)
 
-        # Current Balance Warning/Info Label
+        # Address & Balance Details Label
+        self.addr_info_lbl = tk.Label(card, text="", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["accent"], wraplength=480, justify="left")
+        self.addr_info_lbl.pack(anchor="w", pady=(0, 2))
+
         self.bal_info_lbl = tk.Label(card, text="", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["accent"])
         self.bal_info_lbl.pack(anchor="w", pady=(0, 10))
         self.contact_combo.bind("<<ComboboxSelected>>", lambda e: self._on_contact_change())
@@ -1219,12 +1448,37 @@ class PaymentDialog(tk.Toplevel):
         # Initial trigger
         self._on_contact_change()
 
+    def _get_contact_labels(self):
+        labels = []
+        for c in self.contacts:
+            comp = str(c.get('company_name') or '').strip()
+            name = str(c.get('name') or '').strip()
+            addr = str(c.get('address') or '').strip()
+            label = comp if comp else name
+            if comp and name and comp.lower() != name.lower():
+                label = f"{comp} ({name})"
+            if addr and addr.lower() != 'n/a':
+                label += f" — 📍 {addr}"
+            label += f" [{c.get('contact_type', '')}] (Bal: ₹{c.get('balance', 0.0):,.2f})"
+            labels.append(label)
+        return labels
+
     def _on_contact_change(self):
         c_idx = self.contact_combo.current()
         if c_idx >= 0 and c_idx < len(self.contacts):
             contact = self.contacts[c_idx]
             bal = contact.get('balance', 0.0)
             c_type = contact.get('contact_type', 'Customer')
+            addr = str(contact.get('address') or 'N/A').strip()
+            gstin = str(contact.get('gstin') or '').strip()
+            phone = str(contact.get('phone') or '').strip()
+
+            txt = f"📍 Address: {addr}"
+            if gstin and gstin != 'N/A':
+                txt += f"  |  GSTIN: {gstin}"
+            if phone:
+                txt += f"  |  Mob: {phone}"
+            self.addr_info_lbl.config(text=txt)
 
             if self.default_type:
                 self.type_combo.set(self.default_type)
@@ -1285,8 +1539,8 @@ class PartyLedgerDialog(tk.Toplevel):
     def __init__(self, parent, contact_id=None, on_close=None):
         super().__init__(parent)
         self.title("📜 Party Ledger Statement")
-        self.geometry("880x660")
-        self.minsize(780, 520)
+        self.geometry("920x660")
+        self.minsize(800, 520)
         self.configure(bg=COLORS["bg_dark"])
         self.transient(parent)
         self.grab_set()
@@ -1298,6 +1552,21 @@ class PartyLedgerDialog(tk.Toplevel):
         self._build_ui()
         self.load_ledger()
 
+    def _get_party_labels(self):
+        labels = []
+        for c in self.contacts:
+            comp = str(c.get('company_name') or '').strip()
+            name = str(c.get('name') or '').strip()
+            addr = str(c.get('address') or '').strip()
+            label = comp if comp else name
+            if comp and name and comp.lower() != name.lower():
+                label = f"{comp} ({name})"
+            if addr and addr.lower() != 'n/a':
+                label += f" — 📍 {addr}"
+            label += f" ({c.get('contact_type', '')})"
+            labels.append(label)
+        return labels
+
     def _build_ui(self):
         # Header Toolbar
         h_frame = tk.Frame(self, bg=COLORS["bg_header"], padx=20, pady=14)
@@ -1307,8 +1576,8 @@ class PartyLedgerDialog(tk.Toplevel):
 
         # Contact Selector in Header
         tk.Label(h_frame, text="Select Party:", font=FONTS["small"], bg=COLORS["bg_header"], fg=COLORS["text_muted"]).pack(side="left", padx=(20, 5))
-        c_names = [f"{c['name']} ({c['contact_type']})" for c in self.contacts]
-        self.c_combo = ttk.Combobox(h_frame, values=c_names, state="readonly", width=30)
+        c_names = self._get_party_labels()
+        self.c_combo = ttk.Combobox(h_frame, values=c_names, state="readonly", width=42)
         self.c_combo.pack(side="left", padx=5)
         
         # Set current contact index
@@ -1329,8 +1598,11 @@ class PartyLedgerDialog(tk.Toplevel):
         self.lbl_party_name = tk.Label(summary_card, text="", font=FONTS["heading"], bg=COLORS["bg_card"], fg=COLORS["text_light"])
         self.lbl_party_name.pack(anchor="w")
 
+        self.lbl_party_addr = tk.Label(summary_card, text="", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["accent"])
+        self.lbl_party_addr.pack(anchor="w", pady=(2, 0))
+
         self.lbl_stats = tk.Label(summary_card, text="", font=FONTS["body"], bg=COLORS["bg_card"], fg=COLORS["text_muted"])
-        self.lbl_stats.pack(anchor="w", pady=(2, 0))
+        self.lbl_stats.pack(anchor="w", pady=(4, 0))
 
         # Ledger Table Box
         tbl_frame = tk.Frame(self, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1)
@@ -1374,8 +1646,19 @@ class PartyLedgerDialog(tk.Toplevel):
         tot_paid = ledger_data['total_paid_received']
         net_bal = ledger_data['net_balance']
 
-        self.lbl_party_name.config(text=f"👤 {contact['name']}  |  {contact.get('company_name') or 'N/A'}  ({c_type})")
+        addr_str = str(contact.get('address') or 'N/A').strip()
+        gstin_str = str(contact.get('gstin') or '').strip()
+        phone_str = str(contact.get('phone') or '').strip()
+
+        self.lbl_party_name.config(text=f"👤 {contact['name']}  |  {contact.get('company_name') or 'Individual'}  ({c_type})")
         
+        info_txt = f"📍 Address: {addr_str}"
+        if gstin_str and gstin_str != 'N/A':
+            info_txt += f"  |  GSTIN: {gstin_str}"
+        if phone_str:
+            info_txt += f"  |  Mob: {phone_str}"
+        self.lbl_party_addr.config(text=info_txt)
+
         bal_label_txt = "Receivable Dues" if c_type == 'Customer' else "Payable Dues"
         self.lbl_stats.config(text=f"Total Billed/Invoiced: ₹ {tot_billed:,.2f}  |  Total Received/Paid: ₹ {tot_paid:,.2f}  |  Net {bal_label_txt}: ₹ {net_bal:,.2f}")
 

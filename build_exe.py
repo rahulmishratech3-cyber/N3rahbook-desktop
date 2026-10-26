@@ -35,6 +35,9 @@ def build():
         "--add-data=assets;assets",
         "--add-data=config.py;.",
         "--add-data=inventory_system.db;.",
+        "--hidden-import=psycopg2",
+        "--hidden-import=psycopg2.extras",
+        "--hidden-import=psycopg2.pool",
         f"--icon={os.path.join(base_dir, 'assets', 'logo_icon.png')}",
         "main.py"
     ]

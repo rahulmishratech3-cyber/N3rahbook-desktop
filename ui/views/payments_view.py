@@ -43,14 +43,14 @@ class PaymentsView(tk.Frame):
         tk.Label(ctrl_bar, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=4)
         self.search_entry = ttk.Entry(ctrl_bar, width=20)
         self.search_entry.pack(side="left", padx=4)
-        self.search_entry.bind("<KeyRelease>", lambda e: self.refresh_data())
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
 
         # Type Filter
         tk.Label(ctrl_bar, text="Type:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(10, 4))
         self.type_combo = ttk.Combobox(ctrl_bar, values=["All", "Payment In", "Payment Out"], state="readonly", width=14)
         self.type_combo.current(0)
         self.type_combo.pack(side="left", padx=4)
-        self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data())
+        self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data(recalculate=False))
 
         # Mode Filter
         tk.Label(ctrl_bar, text="Mode:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(10, 4))
@@ -58,7 +58,7 @@ class PaymentsView(tk.Frame):
         self.mode_combo = ttk.Combobox(ctrl_bar, values=modes, state="readonly", width=14)
         self.mode_combo.current(0)
         self.mode_combo.pack(side="left", padx=4)
-        self.mode_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data())
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data(recalculate=False))
 
         # Right Action Buttons
         ttk.Button(ctrl_bar, text="🗑️ Delete", style="Secondary.TButton", command=self._delete_payment).pack(side="right", padx=4)
@@ -70,21 +70,26 @@ class PaymentsView(tk.Frame):
         table_container.pack(fill="both", expand=True, padx=20, pady=10)
 
         cols = [
-            ("payment_number", "Voucher No", 130, "center"),
+            ("payment_number", "Voucher No", 140, "center"),
             ("payment_date", "Date", 110, "center"),
-            ("contact_name", "Party Name", 190, "w"),
+            ("contact_name", "Party / Customer / Vendor", 240, "w"),
             ("payment_type", "Type", 120, "center"),
             ("payment_mode", "Method / Mode", 130, "center"),
-            ("amount", "Amount (₹)", 120, "e"),
-            ("reference_no", "Txn / Ref No", 140, "center"),
-            ("notes", "Notes", 180, "w")
+            ("amount", "Amount (₹)", 140, "e"),
+            ("reference_no", "Txn / Ref No", 150, "center"),
+            ("notes", "Notes / Description", 220, "w")
         ]
         self.table = DataTable(table_container, cols, on_double_click=self._view_ledger)
         self.table.pack(fill="both", expand=True, padx=10, pady=10)
 
-    def refresh_data(self):
+    def _on_search_key(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, lambda: self.refresh_data(recalculate=False))
+
+    def refresh_data(self, recalculate=False):
         # Update KPI cards
-        summary = PaymentModel.get_summary()
+        summary = PaymentModel.get_summary(recalculate=recalculate)
         self.card_in.update_value(f"₹ {summary['total_received']:,.2f}")
         self.card_out.update_value(f"₹ {summary['total_paid']:,.2f}")
         self.card_rec.update_value(f"₹ {summary['net_receivable']:,.2f}")
@@ -107,12 +112,12 @@ class PaymentsView(tk.Frame):
         self.table.load_data(display_rows)
 
     def _record_payment(self):
-        PaymentDialog(self, on_save=self.refresh_data)
+        PaymentDialog(self, on_save=lambda: self.refresh_data(recalculate=True))
 
     def _view_ledger(self, selected_row=None):
         item = selected_row or self.table.get_selected_item()
         contact_id = item.get('contact_id') if item else None
-        PartyLedgerDialog(self, contact_id=contact_id, on_close=self.refresh_data)
+        PartyLedgerDialog(self, contact_id=contact_id, on_close=lambda: self.refresh_data(recalculate=False))
 
     def _delete_payment(self):
         selected_items = self.table.get_selected_items()

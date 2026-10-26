@@ -150,11 +150,85 @@ class SettingsView(tk.Frame):
 
         ttk.Button(fy_box, text="🔒 Close Fiscal Year & Start New FY", style="Secondary.TButton", command=self._open_fy_dialog).pack(side="right")
 
-        # Section - Cloud & Server Data Backup
-        tk.Label(card, text="☁️ Cloud & Server Data Backup", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=19, column=0, columnspan=2, sticky="w", pady=(12, 8))
+        # Row 19: Section - Multi-PC Real-Time Cloud Sync (PostgreSQL / Supabase)
+        tk.Label(card, text="🌐 Multi-PC Cloud Database Sync (PostgreSQL / Supabase)", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=19, column=0, columnspan=2, sticky="w", pady=(14, 8))
+
+        cloud_box = tk.Frame(card, bg=COLORS["bg_card_alt"], padx=15, pady=12, bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1)
+        cloud_box.grid(row=20, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 12))
+
+        # Cloud Mode Status & Toggle
+        cloud_top = tk.Frame(cloud_box, bg=COLORS["bg_card_alt"])
+        cloud_top.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+        self.cloud_sync_var = tk.BooleanVar(value=False)
+        self.chk_cloud = tk.Checkbutton(
+            cloud_top,
+            text="Enable Real-Time Cloud Sync (Multi-PC)",
+            variable=self.cloud_sync_var,
+            bg=COLORS["bg_card_alt"],
+            fg=COLORS["text_light"],
+            activebackground=COLORS["bg_card_alt"],
+            font=FONTS["body_bold"],
+            command=self._on_toggle_cloud
+        )
+        self.chk_cloud.pack(side="left")
+
+        self.cloud_status_badge = tk.Label(
+            cloud_top,
+            text="● Backend: Local SQLite (Offline)",
+            font=FONTS["small_bold"],
+            bg="#E2E8F0",
+            fg="#475569",
+            padx=8, pady=3
+        )
+        self.cloud_status_badge.pack(side="right")
+
+        # Connection URL
+        tk.Label(cloud_box, text="PostgreSQL Connection URI (from Supabase, Neon, or Cloud SQL) *", font=FONTS["small"], bg=COLORS["bg_card_alt"], fg=COLORS["text_muted"]).grid(row=1, column=0, columnspan=2, sticky="w", padx=5)
+
+        url_f = tk.Frame(cloud_box, bg=COLORS["bg_card_alt"])
+        url_f.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+
+        self.cloud_url_entry = ttk.Entry(url_f, width=65, show="*")
+        self.cloud_url_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self._show_cloud_url = False
+        def _toggle_cloud_url():
+            self._show_cloud_url = not self._show_cloud_url
+            self.cloud_url_entry.config(show="" if self._show_cloud_url else "*")
+            self.btn_toggle_cloud_url.config(text="🙈" if self._show_cloud_url else "👁️")
+
+        self.btn_toggle_cloud_url = ttk.Button(url_f, text="👁️", width=3, style="Secondary.TButton", command=_toggle_cloud_url)
+        self.btn_toggle_cloud_url.pack(side="right")
+
+        # Cloud Action Buttons
+        cloud_btns = tk.Frame(cloud_box, bg=COLORS["bg_card_alt"])
+        cloud_btns.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=(4, 6))
+
+        ttk.Button(cloud_btns, text="🔌 Test Connection", style="Secondary.TButton", command=self._test_cloud_connection).pack(side="left", padx=(0, 6))
+        ttk.Button(cloud_btns, text="🚀 Upload & Migrate Local Data to Cloud", style="Secondary.TButton", command=self._migrate_local_to_cloud).pack(side="left", padx=(0, 6))
+        ttk.Button(cloud_btns, text="💾 Save & Switch Mode", style="Primary.TButton", command=self._save_cloud_settings).pack(side="right")
+
+        # Cloud Tip
+        cloud_tip = tk.Label(
+            cloud_box,
+            text="💡 Tip: Create a free PostgreSQL DB on supabase.com or neon.tech, paste the connection URI above, and click 'Upload & Migrate'. Put the exact same URI on your other computer to share and sync all data in real time!",
+            font=FONTS["caption"],
+            bg=COLORS["bg_card_alt"],
+            fg=COLORS["text_muted"],
+            wraplength=700,
+            justify="left"
+        )
+        cloud_tip.grid(row=4, column=0, columnspan=2, sticky="w", padx=5, pady=(2, 0))
+
+        cloud_box.columnconfigure(0, weight=1)
+        cloud_box.columnconfigure(1, weight=1)
+
+        # Row 21: Section - Cloud & Server Data Backup
+        tk.Label(card, text="☁️ Local / Server Data Backup & Auto-Sync Folder", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=21, column=0, columnspan=2, sticky="w", pady=(12, 8))
 
         bk_box = tk.Frame(card, bg=COLORS["bg_card_alt"], padx=15, pady=12, bd=1, relief="flat")
-        bk_box.grid(row=20, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 10))
+        bk_box.grid(row=22, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 10))
 
         # Remote Server URL
         tk.Label(bk_box, text="Remote Server / Webhook URL", font=FONTS["small"], bg=COLORS["bg_card_alt"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=5)
@@ -202,13 +276,65 @@ class SettingsView(tk.Frame):
             bg=COLORS["bg_card"],
             fg=COLORS["text_muted"]
         )
-        self.backup_status_lbl.grid(row=21, column=0, columnspan=2, sticky="w", padx=5, pady=(2, 10))
+        self.backup_status_lbl.grid(row=23, column=0, columnspan=2, sticky="w", padx=5, pady=(2, 10))
 
-        # Row 22: Section - Excel Data Import Tool
-        tk.Label(card, text="📥 GST & Excel Data Import Tool", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=22, column=0, columnspan=2, sticky="w", pady=(15, 10))
+        # Row 24: Section - Gmail PO Auto-Sync Settings
+        tk.Label(card, text="📧 Gmail PO Auto-Sync & PDF Extraction", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=24, column=0, columnspan=2, sticky="w", pady=(15, 8))
+
+        gmail_box = tk.Frame(card, bg=COLORS["bg_card_alt"], padx=15, pady=12, bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1)
+        gmail_box.grid(row=25, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 15))
+
+        # Gmail Address
+        tk.Label(gmail_box, text="Gmail Address *", font=FONTS["small"], bg=COLORS["bg_card_alt"], fg=COLORS["text_muted"]).grid(row=0, column=0, sticky="w", padx=5)
+        self.gmail_entry = ttk.Entry(gmail_box, width=38)
+        self.gmail_entry.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 8))
+
+        # Gmail 16-Digit App Password
+        tk.Label(gmail_box, text="Google App Password (16 Characters) *", font=FONTS["small"], bg=COLORS["bg_card_alt"], fg=COLORS["text_muted"]).grid(row=0, column=1, sticky="w", padx=5)
+        
+        pass_f = tk.Frame(gmail_box, bg=COLORS["bg_card_alt"])
+        pass_f.grid(row=1, column=1, sticky="ew", padx=5, pady=(0, 8))
+
+        self.gmail_pass_entry = ttk.Entry(pass_f, width=28, show="*")
+        self.gmail_pass_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        self._show_pass = False
+        def _toggle_pass():
+            self._show_pass = not self._show_pass
+            self.gmail_pass_entry.config(show="" if self._show_pass else "*")
+            self.btn_toggle_pass.config(text="🙈" if self._show_pass else "👁️")
+
+        self.btn_toggle_pass = ttk.Button(pass_f, text="👁️", width=3, style="Secondary.TButton", command=_toggle_pass)
+        self.btn_toggle_pass.pack(side="right")
+
+        # PO Search Keywords
+        tk.Label(gmail_box, text="Email Filter Keywords (Comma separated)", font=FONTS["small"], bg=COLORS["bg_card_alt"], fg=COLORS["text_muted"]).grid(row=2, column=0, columnspan=2, sticky="w", padx=5)
+        self.gmail_keywords_entry = ttk.Entry(gmail_box, width=75)
+        self.gmail_keywords_entry.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+
+        # Gmail Help Text & Test Button Row
+        gmail_bottom = tk.Frame(gmail_box, bg=COLORS["bg_card_alt"])
+        gmail_bottom.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=(4, 0))
+
+        help_lbl = tk.Label(
+            gmail_bottom,
+            text="💡 Tip: Google Account -> Security -> 2-Step Verification -> App Passwords se 16-digit password banayein.",
+            font=FONTS["small"],
+            bg=COLORS["bg_card_alt"],
+            fg=COLORS["text_muted"]
+        )
+        help_lbl.pack(side="left")
+
+        ttk.Button(gmail_bottom, text="🔍 Test Gmail Connection", style="Secondary.TButton", command=self._test_gmail_connection).pack(side="right")
+
+        gmail_box.columnconfigure(0, weight=1)
+        gmail_box.columnconfigure(1, weight=1)
+
+        # Row 26: Section - Excel Data Import Tool
+        tk.Label(card, text="📥 GST & Excel Data Import Tool", font=FONTS["body_bold"], bg=COLORS["bg_card"], fg=COLORS["primary"]).grid(row=26, column=0, columnspan=2, sticky="w", pady=(15, 10))
 
         import_card = tk.Frame(card, bg=COLORS["bg_card_alt"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=15, pady=12)
-        import_card.grid(row=23, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 15))
+        import_card.grid(row=27, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 15))
 
         tk.Label(
             import_card,
@@ -230,10 +356,34 @@ class SettingsView(tk.Frame):
                 self.entries[key].delete(0, tk.END)
                 self.entries[key].insert(0, profile.get(key, ''))
 
+        # Load Gmail Sync Settings
+        self.gmail_entry.delete(0, tk.END)
+        self.gmail_entry.insert(0, profile.get('gmail_address', ''))
+
+        self.gmail_pass_entry.delete(0, tk.END)
+        self.gmail_pass_entry.insert(0, profile.get('gmail_app_password', ''))
+
+        self.gmail_keywords_entry.delete(0, tk.END)
+        self.gmail_keywords_entry.insert(0, profile.get('gmail_filter_keywords') or 'PO, Purchase Order, Order, CPO')
+
         terms = profile.get('terms', [])
         terms_str = "\n".join(terms) if isinstance(terms, list) else str(terms)
         self.terms_txt.delete("1.0", tk.END)
         self.terms_txt.insert("1.0", terms_str)
+
+        # Load Cloud Sync Settings
+        try:
+            from services.cloud_db_service import get_cloud_config
+            from database.db_manager import db
+            cloud_cfg = get_cloud_config()
+            self.cloud_sync_var.set(cloud_cfg.get("enabled", False))
+            self.cloud_url_entry.delete(0, tk.END)
+            self.cloud_url_entry.insert(0, cloud_cfg.get("connection_url", ""))
+            is_active_cloud = cloud_cfg.get("enabled", False) and db.cloud_mode
+            display_host = cloud_cfg.get("connection_url", "").split('@')[-1] if '@' in cloud_cfg.get("connection_url", "") else 'PostgreSQL'
+            self._update_cloud_badge(is_active_cloud, display_host)
+        except Exception as ex:
+            print("Error loading cloud settings:", ex)
 
         from models.fiscal_year import FiscalYearModel
         active_fy = FiscalYearModel.get_active_year()
@@ -255,6 +405,136 @@ class SettingsView(tk.Frame):
         last_time = bk_config.get('last_backup_time', 'Never')
         last_stat = bk_config.get('last_backup_status', '')
         self.backup_status_lbl.config(text=f"Last Backup: {last_time} ({last_stat})")
+
+    def _update_cloud_badge(self, is_cloud, host_info=""):
+        if is_cloud:
+            self.cloud_status_badge.config(
+                text=f"● Live Cloud Sync ACTIVE ({host_info})",
+                bg="#DCFCE7",
+                fg="#166534"
+            )
+        else:
+            self.cloud_status_badge.config(
+                text="● Backend: Local SQLite (Offline)",
+                bg="#E2E8F0",
+                fg="#475569"
+            )
+
+    def _on_toggle_cloud(self):
+        is_enabled = self.cloud_sync_var.get()
+        if is_enabled and not self.cloud_url_entry.get().strip():
+            messagebox.showinfo(
+                "Cloud Database Sync",
+                "Please enter your PostgreSQL connection URI (from Supabase or Neon) and click 'Save & Switch Mode'.",
+                parent=self
+            )
+
+    def _test_cloud_connection(self):
+        import threading
+        from services.cloud_db_service import test_connection
+
+        url = self.cloud_url_entry.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a PostgreSQL Connection URI.", parent=self)
+            return
+
+        def _test():
+            ok, msg = test_connection(url)
+            def _ui():
+                if ok:
+                    messagebox.showinfo("Cloud Connection Success", f"✅ {msg}", parent=self)
+                else:
+                    messagebox.showerror("Cloud Connection Failed", f"❌ {msg}", parent=self)
+            self.after(0, _ui)
+
+        threading.Thread(target=_test, daemon=True).start()
+
+    def _migrate_local_to_cloud(self):
+        import threading
+        from services.cloud_db_service import migrate_local_to_cloud
+
+        url = self.cloud_url_entry.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a PostgreSQL Connection URI first.", parent=self)
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Cloud Migration",
+            "This will upload and synchronize all your existing products, customers, invoices, and settings from this computer into your cloud database.\n\n"
+            "Do you want to proceed with the migration?",
+            parent=self
+        )
+        if not confirm:
+            return
+
+        self.cloud_status_badge.config(text="⏳ Migrating data to cloud...", bg="#FEF3C7", fg="#92400E")
+
+        def _migrate():
+            ok, msg = migrate_local_to_cloud(url)
+            def _ui():
+                if ok:
+                    messagebox.showinfo("Migration Successful", f"✅ {msg}", parent=self)
+                    self.cloud_sync_var.set(True)
+                    self._save_cloud_settings()
+                else:
+                    messagebox.showerror("Migration Error", f"❌ {msg}", parent=self)
+                    self.load_data()
+            self.after(0, _ui)
+
+        threading.Thread(target=_migrate, daemon=True).start()
+
+    def _save_cloud_settings(self):
+        from services.cloud_db_service import save_cloud_config
+        from database.db_manager import db
+
+        url = self.cloud_url_entry.get().strip()
+        enabled = self.cloud_sync_var.get()
+
+        if enabled and not url:
+            messagebox.showerror("Error", "Please enter a valid PostgreSQL Connection URI before enabling Cloud Sync.", parent=self)
+            self.cloud_sync_var.set(False)
+            return
+
+        ok, msg = save_cloud_config({
+            "enabled": enabled,
+            "connection_url": url
+        })
+
+        if ok:
+            db.reload_backend()
+            display_host = url.split('@')[-1] if '@' in url else 'PostgreSQL'
+            self._update_cloud_badge(enabled and db.cloud_mode, display_host)
+
+            mode_name = "Online Cloud Database (PostgreSQL)" if (enabled and db.cloud_mode) else "Local Offline Database (SQLite)"
+            messagebox.showinfo(
+                "Database Backend Switched",
+                f"✅ Database configuration saved!\n\nActive Mode: {mode_name}\n\nAll subsequent operations will synchronize directly with this database.",
+                parent=self
+            )
+        else:
+            messagebox.showerror("Error", f"Failed to save cloud config: {msg}", parent=self)
+
+    def _test_gmail_connection(self):
+        import threading
+        from services.gmail_service import GmailSyncService
+
+        gmail_addr = self.gmail_entry.get().strip()
+        gmail_pass = self.gmail_pass_entry.get().strip()
+
+        if not gmail_addr or not gmail_pass:
+            messagebox.showerror("Error", "Kripya Gmail Address aur Google App Password dono daalein.", parent=self)
+            return
+
+        def _check():
+            ok, msg = GmailSyncService.test_connection(gmail_addr, gmail_pass)
+            def _ui():
+                if ok:
+                    messagebox.showinfo("Gmail Connection Success", f"✅ {msg}", parent=self)
+                else:
+                    messagebox.showerror("Gmail Connection Failed", f"❌ {msg}", parent=self)
+            self.after(0, _ui)
+
+        threading.Thread(target=_check, daemon=True).start()
 
     def _browse_sync_folder(self):
         from tkinter import filedialog
@@ -289,6 +569,9 @@ class SettingsView(tk.Frame):
     def _save_settings(self):
         data = {k: e.get().strip() for k, e in self.entries.items()}
         data['terms'] = self.terms_txt.get("1.0", tk.END).strip()
+        data['gmail_address'] = self.gmail_entry.get().strip()
+        data['gmail_app_password'] = self.gmail_pass_entry.get().strip()
+        data['gmail_filter_keywords'] = self.gmail_keywords_entry.get().strip() or 'PO, Purchase Order, Order, CPO'
 
         if not data['name']:
             messagebox.showerror("Error", "Business / Company Name is required!", parent=self)
@@ -297,10 +580,11 @@ class SettingsView(tk.Frame):
         try:
             CompanyModel.update_profile(data)
             self._save_backup_settings()
-            messagebox.showinfo("Success", "Company profile, invoice settings, and backup config updated successfully!", parent=self)
+            messagebox.showinfo("Success", "Company profile, invoice settings, and Gmail configuration updated successfully!", parent=self)
         except Exception as ex:
             messagebox.showerror("Error", f"Failed to save profile: {str(ex)}", parent=self)
 
     def _open_excel_import(self):
         from ui.components.excel_import_dialog import ExcelImportDialog
         ExcelImportDialog(self)
+

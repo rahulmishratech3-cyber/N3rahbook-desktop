@@ -35,7 +35,8 @@ class CompanyModel:
             UPDATE company_profile SET
                 name = ?, address = ?, gstin = ?, pan = ?, mobile = ?, email = ?, udyam_reg_no = ?,
                 bank_name = ?, bank_branch = ?, account_no = ?, ifsc_code = ?, terms = ?,
-                current_fiscal_year = COALESCE(?, current_fiscal_year, '2026-2027')
+                current_fiscal_year = COALESCE(?, current_fiscal_year, '2026-2027'),
+                gmail_address = ?, gmail_app_password = ?, gmail_filter_keywords = ?
             WHERE id = 1
             """
             db.execute_query(sql, (
@@ -43,19 +44,24 @@ class CompanyModel:
                 data.get('pan', ''), data.get('mobile', ''), data.get('email', ''), udyam_val,
                 data.get('bank_name', ''), data.get('bank_branch', ''),
                 data.get('account_no', ''), data.get('ifsc_code', ''), terms_str,
-                data.get('current_fiscal_year')
+                data.get('current_fiscal_year'),
+                data.get('gmail_address', ''), data.get('gmail_app_password', ''),
+                data.get('gmail_filter_keywords', 'PO, Purchase Order, Order, CPO')
             ))
         else:
             sql = """
             INSERT INTO company_profile (
                 id, name, address, gstin, pan, mobile, email, udyam_reg_no,
-                bank_name, bank_branch, account_no, ifsc_code, terms, current_fiscal_year
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                bank_name, bank_branch, account_no, ifsc_code, terms, current_fiscal_year,
+                gmail_address, gmail_app_password, gmail_filter_keywords
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             db.execute_query(sql, (
                 data.get('name', ''), data.get('address', ''), data.get('gstin', ''),
                 data.get('pan', ''), data.get('mobile', ''), data.get('email', ''), udyam_val,
                 data.get('bank_name', ''), data.get('bank_branch', ''),
                 data.get('account_no', ''), data.get('ifsc_code', ''), terms_str,
-                data.get('current_fiscal_year', '2026-2027')
+                data.get('current_fiscal_year', '2026-2027'),
+                data.get('gmail_address', ''), data.get('gmail_app_password', ''),
+                data.get('gmail_filter_keywords', 'PO, Purchase Order, Order, CPO')
             ))

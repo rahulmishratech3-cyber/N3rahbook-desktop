@@ -42,16 +42,20 @@ class HeaderBar(tk.Frame):
         s_icon = tk.Label(search_frame, text="🔍", bg="#FFFFFF", fg=COLORS["text_muted"], font=("Segoe UI", 10))
         s_icon.pack(side="left", padx=8)
 
+        self.placeholder_text = "Global search..."
         self.search_entry = tk.Entry(
             search_frame,
             bg="#FFFFFF",
-            fg=COLORS["text_dark"],
+            fg=COLORS["text_muted"],
             insertbackground=COLORS["text_dark"],
             font=FONTS["body"],
             bd=0,
-            width=26
+            width=24
         )
+        self.search_entry.insert(0, self.placeholder_text)
         self.search_entry.pack(side="left", padx=(0, 8), pady=6)
+        self.search_entry.bind("<FocusIn>", self._on_search_focus_in)
+        self.search_entry.bind("<FocusOut>", self._on_search_focus_out)
         self.search_entry.bind("<KeyRelease>", self._handle_search)
 
         # Refresh Data Button
@@ -96,9 +100,27 @@ class HeaderBar(tk.Frame):
             self.alert_var.set("✅ Stock Healthy")
             self.alert_badge.config(bg=COLORS["badge_instock"], fg=COLORS["success"])
 
+    def _on_search_focus_in(self, event=None):
+        if self.search_entry.get().strip() == self.placeholder_text:
+            self.search_entry.delete(0, tk.END)
+            self.search_entry.config(fg=COLORS["text_dark"])
+
+    def _on_search_focus_out(self, event=None):
+        if not self.search_entry.get().strip():
+            self.search_entry.insert(0, self.placeholder_text)
+            self.search_entry.config(fg=COLORS["text_muted"])
+
     def _handle_search(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, self._do_search)
+
+    def _do_search(self):
         if self.on_search:
-            self.on_search(self.search_entry.get().strip())
+            txt = self.search_entry.get().strip()
+            if txt == self.placeholder_text:
+                txt = ""
+            self.on_search(txt)
 
     def _handle_refresh(self):
         if self.on_refresh:

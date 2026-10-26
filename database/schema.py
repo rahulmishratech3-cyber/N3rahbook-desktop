@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     customer_id INTEGER NOT NULL,
     invoice_date TEXT NOT NULL,
     due_date TEXT,
+    po_number TEXT,
+    po_date TEXT,
     vehicle_no TEXT,
     eway_bill_no TEXT,
     fiscal_year TEXT DEFAULT '2026-2027',
@@ -112,6 +114,12 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     order_date TEXT NOT NULL,
     expected_date TEXT,
     status TEXT CHECK(status IN ('Draft', 'Issued', 'Received', 'Cancelled')) DEFAULT 'Draft',
+    subtotal REAL DEFAULT 0.0,
+    freight REAL DEFAULT 0.0,
+    cgst_amount REAL DEFAULT 0.0,
+    sgst_amount REAL DEFAULT 0.0,
+    igst_amount REAL DEFAULT 0.0,
+    round_off REAL DEFAULT 0.0,
     total_amount REAL DEFAULT 0.0,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -146,7 +154,23 @@ CREATE TABLE IF NOT EXISTS company_profile (
     account_no TEXT,
     ifsc_code TEXT,
     terms TEXT,
-    current_fiscal_year TEXT DEFAULT '2026-2027'
+    current_fiscal_year TEXT DEFAULT '2026-2027',
+    gmail_address TEXT DEFAULT '',
+    gmail_app_password TEXT DEFAULT '',
+    gmail_filter_keywords TEXT DEFAULT 'PO, Purchase Order, Order, CPO'
+);
+
+CREATE TABLE IF NOT EXISTS processed_email_pos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT UNIQUE,
+    sender TEXT,
+    subject TEXT,
+    received_date TEXT,
+    pdf_filename TEXT,
+    po_number TEXT,
+    customer_id INTEGER,
+    status TEXT DEFAULT 'Imported',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS fiscal_years (

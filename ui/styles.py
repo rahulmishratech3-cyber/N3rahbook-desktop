@@ -38,7 +38,7 @@ def apply_app_styles(root):
         font=FONTS["body_bold"],
         borderwidth=0,
         focuscolor="none",
-        padding=(14, 7)
+        padding=(10, 5)
     )
     style.map(
         "Primary.TButton",
@@ -54,7 +54,7 @@ def apply_app_styles(root):
         font=FONTS["body"],
         borderwidth=0,
         focuscolor="none",
-        padding=(12, 6)
+        padding=(9, 4)
     )
     style.map(
         "Secondary.TButton",
@@ -69,11 +69,12 @@ def apply_app_styles(root):
         foreground="#FFFFFF",
         font=FONTS["body_bold"],
         borderwidth=0,
-        padding=(14, 7)
+        padding=(10, 5)
     )
     style.map(
         "Success.TButton",
-        background=[("active", "#059669")]
+        background=[("active", "#059669"), ("pressed", "#047857")],
+        foreground=[("active", "#FFFFFF")]
     )
 
     # Entry Fields (White background with Dark text and Slate Border)

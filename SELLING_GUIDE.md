@@ -63,5 +63,30 @@ python build_exe.py
 
 ---
 
+## 🌐 Multi-PC Real-Time Cloud Synchronization (Optional)
+
+N3RAH BOOK supports live, simultaneous multi-device sync across multiple computers (e.g. Office PC + Home PC, or Billing Counter + Manager Desk):
+
+1. **Get Free PostgreSQL Cloud Database**:
+   * Create a free account at [Supabase](https://supabase.com) or [Neon.tech](https://neon.tech).
+   * Copy the PostgreSQL Connection URI (e.g., `postgresql://postgres:[password]@db.xxxx.supabase.co:5432/postgres`).
+
+2. **Connect from the App**:
+   * Open **⚙️ Settings & Profile**.
+   * Under **"🌐 Multi-PC Cloud Database Sync"**:
+     * Check **"Enable Real-Time Cloud Sync (Multi-PC)"**.
+     * Paste the Connection URI.
+     * Click **"🔌 Test Connection"** to verify.
+     * Click **"🚀 Upload & Migrate Local Data to Cloud"** to transfer your existing products, customers, and invoices.
+     * Click **"💾 Save & Switch Mode"**.
+
+3. **Connect Secondary Computer**:
+   * Install N3RAH BOOK on your second computer.
+   * Open **⚙️ Settings & Profile**, paste the exact same Connection URI, and click **"Save & Switch Mode"**.
+   * Both computers are now connected to the same live database! Invoices and stock updates sync instantaneously in real time.
+
+---
+
 ## 🔒 Security & Data Ownership
-* 100% Offline & Private: No cloud connection required. All client data stays securely on their local system.
+* 100% Offline Capable: Can run locally without internet using SQLite, or connected to your private cloud PostgreSQL database.
+* End-to-End SSL encryption for all cloud database operations.

@@ -3,16 +3,20 @@ Party Purchase Order (Customer PO) Hisaab & Balance Tracker View
 Tracks Customer POs, Dispatches in KG, and Balance Pending Quantities/Amounts in real time.
 """
 
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 from config import COLORS, FONTS
 from models.customer_po import CustomerPOModel
 from models.contact import ContactModel
+from models.company import CompanyModel
 from ui.components.cards import KPICard
 from ui.components.data_table import DataTable
 from ui.components.customer_po_dialog import CustomerPODialog
 from ui.components.po_dispatch_dialog import PODispatchDialog
+from ui.components.incoming_po_dialog import IncomingPODialog
+from services.gmail_service import GmailSyncService
 
 class CustomerPOView(tk.Frame):
     def __init__(self, parent):
@@ -41,55 +45,83 @@ class CustomerPOView(tk.Frame):
         ctrl_bar = tk.Frame(self, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1, padx=15, pady=10)
         ctrl_bar.pack(fill="x", padx=20, pady=5)
 
+        # Top Row: Primary Actions
+        row_top = tk.Frame(ctrl_bar, bg=COLORS["bg_card"])
+        row_top.pack(fill="x", pady=(0, 8))
+
+        tk.Label(row_top, text="📜 Party PO Tracker & Dispatch Ledger", font=FONTS["heading"], bg=COLORS["bg_card"], fg=COLORS["text_light"]).pack(side="left")
+
+        ttk.Button(row_top, text="🗑️ Delete", style="Secondary.TButton", command=self._delete_selected).pack(side="right", padx=3)
+        ttk.Button(row_top, text="📄 View / Print PDF", style="Primary.TButton", command=self._export_selected_pdf).pack(side="right", padx=3)
+        ttk.Button(row_top, text="📜 View Hisaab", style="Secondary.TButton", command=self._view_hisaab_details).pack(side="right", padx=3)
+        ttk.Button(row_top, text="🚚 Log Dispatch", style="Secondary.TButton", command=self._log_dispatch).pack(side="right", padx=3)
+        ttk.Button(row_top, text="➕ New Party PO", style="Primary.TButton", command=self._add_po).pack(side="right", padx=3)
+        ttk.Button(row_top, text="📥 Sync Gmail POs", style="Primary.TButton", command=self._sync_gmail_pos).pack(side="right", padx=3)
+
+        # Bottom Row: Filters + Edit Button
+        row_sub = tk.Frame(ctrl_bar, bg=COLORS["bg_card"])
+        row_sub.pack(fill="x")
+
         # Search box
-        tk.Label(ctrl_bar, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=4)
-        self.search_entry = ttk.Entry(ctrl_bar, width=18)
-        self.search_entry.pack(side="left", padx=4)
-        self.search_entry.bind("<KeyRelease>", lambda e: self.refresh_data())
+        tk.Label(row_sub, text="Search:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(0, 4))
+        self.search_entry = ttk.Entry(row_sub, width=18)
+        self.search_entry.pack(side="left", padx=(0, 8))
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
 
         # Customer/Party Filter
-        tk.Label(ctrl_bar, text="Party:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=6)
-        self.cust_combo = ttk.Combobox(ctrl_bar, values=["All"], state="readonly", width=18)
+        tk.Label(row_sub, text="Party:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(0, 4))
+        self.cust_combo = ttk.Combobox(row_sub, values=["All"], state="readonly", width=18)
         self.cust_combo.current(0)
-        self.cust_combo.pack(side="left", padx=4)
+        self.cust_combo.pack(side="left", padx=(0, 8))
         self.cust_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data())
 
         # Status Filter
-        tk.Label(ctrl_bar, text="Status:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=6)
-        self.status_combo = ttk.Combobox(ctrl_bar, values=["All", "Open", "Partially Dispatched", "Completed"], state="readonly", width=16)
+        tk.Label(row_sub, text="Status:", font=FONTS["small"], bg=COLORS["bg_card"], fg=COLORS["text_muted"]).pack(side="left", padx=(0, 4))
+        self.status_combo = ttk.Combobox(row_sub, values=["All", "Open", "Partially Dispatched", "Completed"], state="readonly", width=16)
         self.status_combo.current(0)
-        self.status_combo.pack(side="left", padx=4)
+        self.status_combo.pack(side="left", padx=(0, 8))
         self.status_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_data())
 
-        # Right Action Buttons
-        ttk.Button(ctrl_bar, text="🗑️ Delete", style="Secondary.TButton", command=self._delete_selected).pack(side="right", padx=3)
-        ttk.Button(ctrl_bar, text="📜 View Hisaab", style="Secondary.TButton", command=self._view_hisaab_details).pack(side="right", padx=3)
-        ttk.Button(ctrl_bar, text="✏️ Edit PO", style="Secondary.TButton", command=self._edit_selected).pack(side="right", padx=3)
-        ttk.Button(ctrl_bar, text="🚚 Log Dispatch", style="Secondary.TButton", command=self._log_dispatch).pack(side="right", padx=3)
-        ttk.Button(ctrl_bar, text="➕ New Party PO", style="Primary.TButton", command=self._add_po).pack(side="right", padx=3)
+        ttk.Button(row_sub, text="✏️ Edit PO", style="Secondary.TButton", command=self._edit_selected).pack(side="right", padx=3)
 
         # 3. Data Table Container
         table_container = tk.Frame(self, bg=COLORS["bg_card"], bd=1, relief="flat", highlightbackground=COLORS["border"], highlightthickness=1)
         table_container.pack(fill="both", expand=True, padx=20, pady=10)
 
         cols = [
-            ("po_number", "PO Reference #", 120, "center"),
-            ("customer_name", "Party / Customer Name", 200, "w"),
-            ("po_date", "PO Date", 100, "center"),
-            ("total_ordered_qty_kg", "Ordered (KG)", 110, "center"),
-            ("total_dispatched_qty_kg", "Dispatched (KG)", 110, "center"),
-            ("balance_qty_kg", "Balance Pending (KG)", 140, "center"),
-            ("total_po_amount", "Total PO Value (₹)", 120, "e"),
-            ("balance_amount", "Balance Value (₹)", 120, "e"),
+            ("po_number", "PO Reference #", 130, "center"),
+            ("customer_name", "Party / Customer Name", 240, "w"),
+            ("po_date", "PO Date", 110, "center"),
+            ("total_ordered_qty_kg", "Ordered (KG)", 120, "center"),
+            ("total_dispatched_qty_kg", "Dispatched (KG)", 120, "center"),
+            ("balance_qty_kg", "Balance Pending (KG)", 150, "center"),
+            ("total_po_amount", "Total PO Value (₹)", 140, "e"),
+            ("balance_amount", "Balance Value (₹)", 140, "e"),
             ("status", "Status", 130, "center")
         ]
-        self.table = DataTable(table_container, cols, on_double_click=self._view_hisaab_details)
+        self.table = DataTable(table_container, cols, on_double_click=self._edit_selected)
         self.table.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def _on_search_key(self, event=None):
+        if hasattr(self, '_search_timer') and self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(300, self.refresh_data)
 
     def refresh_data(self):
         # Update Party Combo List
         customers = ContactModel.get_all()
-        self.customers_map = {f"{c['name']} ({c['company_name'] or 'Individual'})": c['id'] for c in customers}
+        self.customers_map = {}
+        for c in customers:
+            comp = str(c.get('company_name') or '').strip()
+            name = str(c.get('name') or '').strip()
+            addr = str(c.get('address') or '').strip()
+            label = comp if comp else name
+            if comp and name and comp.lower() != name.lower():
+                label = f"{comp} ({name})"
+            if addr and addr.lower() != 'n/a':
+                label += f" — 📍 {addr}"
+            self.customers_map[label] = c['id']
+
         party_options = ["All"] + list(self.customers_map.keys())
         
         curr_party = self.cust_combo.get()
@@ -252,7 +284,114 @@ class CustomerPOView(tk.Frame):
 
         table_disp.load_data(formatted_dispatches)
 
-        # Close button
+        # Bottom buttons
         b = tk.Frame(dlg, bg=COLORS["bg_dark"], padx=15, pady=10)
         b.pack(fill="x", side="bottom")
-        ttk.Button(b, text="Close", style="Primary.TButton", command=dlg.destroy).pack(side="right")
+        ttk.Button(b, text="Close", style="Secondary.TButton", command=dlg.destroy).pack(side="right", padx=5)
+        ttk.Button(b, text="📄 View / Print PO PDF", style="Primary.TButton", command=lambda: self._export_selected_pdf({'id': po_id})).pack(side="right", padx=5)
+
+    def _export_selected_pdf(self, selected_row=None):
+        import os
+        import subprocess
+        from models.contact import ContactModel
+        from services.pdf_service import generate_customer_po_pdf
+        selected = selected_row or self.table.get_selected_item()
+        if not selected:
+            messagebox.showwarning("Selection Required", "Please select a Party PO from the table to view/export as PDF.", parent=self)
+            return
+
+        po = CustomerPOModel.get_by_id(selected['id'])
+        if not po:
+            return
+
+        customer = ContactModel.get_by_id(po['customer_id']) or {}
+        try:
+            pdf_path = generate_customer_po_pdf(
+                po=po,
+                customer=customer,
+                items=po.get('items', []),
+                dispatches=po.get('dispatches', []),
+                page_size="A4"
+            )
+
+            if os.name == 'nt':
+                os.startfile(pdf_path)
+            else:
+                subprocess.run(['xdg-open', pdf_path])
+
+            messagebox.showinfo("PDF Generated", f"Party Purchase Order PDF generated successfully:\n{pdf_path}", parent=self)
+        except Exception as ex:
+            messagebox.showerror("Error", f"Failed to generate Party PO PDF: {str(ex)}", parent=self)
+
+    def _sync_gmail_pos(self):
+        profile = CompanyModel.get_profile() or {}
+        gmail_addr = (profile.get('gmail_address') or '').strip()
+        gmail_pass = (profile.get('gmail_app_password') or '').strip()
+        keywords = profile.get('gmail_filter_keywords') or 'PO, Purchase Order, Order, CPO'
+
+        if not gmail_addr or not gmail_pass:
+            resp = messagebox.askyesno(
+                "Gmail Setup Required",
+                "Gmail Address ya Google App Password configure nahi hai.\n\nKya aap abhi Settings me jaakar Gmail configure karna chahte hain?",
+                parent=self
+            )
+            return
+
+        # Show a progress/loading dialog
+        progress_dlg = tk.Toplevel(self)
+        progress_dlg.title("Connecting to Gmail...")
+        progress_dlg.geometry("380x140")
+        progress_dlg.resizable(False, False)
+        progress_dlg.configure(bg=COLORS["bg_dark"])
+        progress_dlg.transient(self)
+        progress_dlg.grab_set()
+
+        lbl_msg = tk.Label(
+            progress_dlg,
+            text="🔄 Gmail Inbox se PO emails aur PDF attachments\nfetch kiye jaa rahe hain...\nKripya thoda intezaar karein.",
+            font=FONTS["body"],
+            bg=COLORS["bg_dark"],
+            fg=COLORS["text_light"],
+            justify="center",
+            pady=15
+        )
+        lbl_msg.pack()
+
+        pbar = ttk.Progressbar(progress_dlg, mode="indeterminate", length=280)
+        pbar.pack(pady=5)
+        pbar.start(10)
+
+        def _worker():
+            err_msg = None
+            fetched_emails = []
+            try:
+                fetched_emails = GmailSyncService.fetch_incoming_po_emails(
+                    email_address=gmail_addr,
+                    app_password=gmail_pass,
+                    keywords=keywords,
+                    limit=20
+                )
+            except Exception as e:
+                err_msg = str(e)
+
+            def _on_finish():
+                if progress_dlg.winfo_exists():
+                    pbar.stop()
+                    progress_dlg.destroy()
+
+                if err_msg:
+                    messagebox.showerror("Gmail Sync Error", f"Gmail sync me truti aayi:\n\n{err_msg}", parent=self)
+                elif not fetched_emails:
+                    messagebox.showinfo(
+                        "No New POs",
+                        f"Gmail inbox me '{keywords}' se related koi nayi PO PDF attachment nahi mili.",
+                        parent=self
+                    )
+                else:
+                    IncomingPODialog(self, fetched_emails, on_imported=self.refresh_data)
+
+            self.after(0, _on_finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+

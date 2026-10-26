@@ -25,7 +25,8 @@ class CustomerPOModel:
     @staticmethod
     def get_all(query="", customer_id="All", status_filter="All"):
         sql = """
-        SELECT po.*, c.name as customer_name, c.company_name, c.phone as customer_phone
+        SELECT po.*, c.name as customer_name, c.company_name, c.phone as customer_phone,
+               c.address as customer_address, c.gstin as customer_gstin, c.pan as customer_pan, c.email as customer_email
         FROM customer_pos po
         JOIN contacts c ON po.customer_id = c.id
         WHERE 1=1
@@ -63,7 +64,8 @@ class CustomerPOModel:
     @staticmethod
     def get_by_id(po_id):
         po = db.fetch_one("""
-        SELECT po.*, c.name as customer_name, c.company_name, c.phone as customer_phone, c.address as customer_address
+        SELECT po.*, c.name as customer_name, c.company_name, c.phone as customer_phone,
+               c.address as customer_address, c.gstin as customer_gstin, c.pan as customer_pan, c.email as customer_email
         FROM customer_pos po
         JOIN contacts c ON po.customer_id = c.id
         WHERE po.id = ?
@@ -232,6 +234,101 @@ class CustomerPOModel:
     def delete(po_id):
         return CustomerPOModel.delete_many([po_id]) > 0
 
+
+    @staticmethod
+    def get_by_po_number(po_number):
+        if not po_number or not str(po_number).strip():
+            return None
+        clean_num = str(po_number).strip()
+        row = db.fetch_one("SELECT id FROM customer_pos WHERE UPPER(po_number) = UPPER(?)", (clean_num,))
+        if row:
+            return CustomerPOModel.get_by_id(row['id'])
+        return None
+
+    @staticmethod
+    def get_pos_for_customer(customer_id):
+        if not customer_id:
+            return []
+        sql = """
+        SELECT id, po_number, po_date, total_ordered_qty_kg, total_dispatched_qty_kg, status
+        FROM customer_pos
+        WHERE customer_id = ? AND status != 'Cancelled'
+        ORDER BY id DESC
+        """
+        return db.fetch_all(sql, (customer_id,))
+
+    @staticmethod
+    def sync_invoice_dispatch(invoice_number, po_number, dispatch_date, dispatched_qty_kg, dispatched_amount=0.0, notes=""):
+        """
+        Syncs a sales invoice's billed quantity against the referenced Customer PO.
+        Idempotent: Removes any previous dispatch record for this invoice_number and re-applies if po_number matches.
+        """
+        if not invoice_number:
+            return
+
+        inv_clean = str(invoice_number).strip()
+        po_clean = str(po_number or '').strip()
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 1. Find any POs previously affected by this invoice
+            prev_records = cursor.execute("SELECT DISTINCT customer_po_id FROM customer_po_dispatches WHERE invoice_number = ?", (inv_clean,)).fetchall()
+            affected_po_ids = {r[0] for r in prev_records}
+
+            # 2. Delete old dispatches for this invoice number
+            cursor.execute("DELETE FROM customer_po_dispatches WHERE invoice_number = ?", (inv_clean,))
+
+            # 3. If a valid matching Customer PO is specified, insert new dispatch
+            if po_clean:
+                po_row = cursor.execute("SELECT id FROM customer_pos WHERE UPPER(po_number) = UPPER(?)", (po_clean,)).fetchone()
+                if po_row:
+                    target_po_id = po_row[0]
+                    affected_po_ids.add(target_po_id)
+                    disp_date = dispatch_date or datetime.now().strftime("%Y-%m-%d")
+                    cursor.execute("""
+                        INSERT INTO customer_po_dispatches (customer_po_id, dispatch_date, invoice_number, dispatched_qty_kg, dispatched_amount, notes)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (target_po_id, disp_date, inv_clean, _to_float(dispatched_qty_kg), _to_float(dispatched_amount), notes or f"Billed via Tax Invoice #{inv_clean}"))
+
+            # 4. Recalculate total_dispatched_qty_kg, total_dispatched_amount, and status for all affected POs
+            for p_id in affected_po_ids:
+                disp_totals = cursor.execute("""
+                    SELECT COALESCE(SUM(dispatched_qty_kg), 0.0) as sum_qty,
+                           COALESCE(SUM(dispatched_amount), 0.0) as sum_amt
+                    FROM customer_po_dispatches
+                    WHERE customer_po_id = ?
+                """, (p_id,)).fetchone()
+
+                sum_qty = _to_float(disp_totals[0]) if disp_totals else 0.0
+                sum_amt = _to_float(disp_totals[1]) if disp_totals else 0.0
+
+                po_info = cursor.execute("SELECT total_ordered_qty_kg FROM customer_pos WHERE id = ?", (p_id,)).fetchone()
+                if po_info:
+                    ord_qty = _to_float(po_info[0])
+                    if sum_qty >= ord_qty and ord_qty > 0:
+                        new_status = 'Completed'
+                    elif sum_qty > 0:
+                        new_status = 'Partially Dispatched'
+                    else:
+                        new_status = 'Open'
+
+                    cursor.execute("""
+                        UPDATE customer_pos
+                        SET total_dispatched_qty_kg = ?, total_dispatched_amount = ?, status = ?
+                        WHERE id = ?
+                    """, (sum_qty, sum_amt, new_status, p_id))
+
+            conn.commit()
+
+    @staticmethod
+    def remove_invoice_dispatch(invoice_number):
+        """
+        Removes dispatch records associated with an invoice and restores the PO balances.
+        """
+        if not invoice_number:
+            return
+        CustomerPOModel.sync_invoice_dispatch(invoice_number=invoice_number, po_number=None, dispatch_date=None, dispatched_qty_kg=0.0, dispatched_amount=0.0)
 
     @staticmethod
     def record_dispatch(po_id, dispatch_date, invoice_number, dispatched_qty_kg, dispatched_amount=0.0, notes=""):
